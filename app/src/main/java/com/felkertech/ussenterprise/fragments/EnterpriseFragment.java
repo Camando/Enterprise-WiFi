@@ -2,21 +2,17 @@
 package com.felkertech.ussenterprise.fragments;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.net.ConnectivityManager;
-import android.net.Network;
-import android.net.NetworkCapabilities;
-import android.net.NetworkRequest;
 import android.net.wifi.ScanResult;
 import android.net.wifi.WifiEnterpriseConfig;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
-import android.net.wifi.WifiNetworkSpecifier;
+import android.net.wifi.WifiNetworkSuggestion;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
@@ -43,9 +39,11 @@ import java.util.List;
 public class EnterpriseFragment extends Fragment {
 
     private static final String TAG = "EnterpriseWifi";
-    private static final String DOMAIN = "cqu.edu.au";
     private static final String SSID = "eduroam";
+    private static final String DOMAIN = "cqu.edu.au";
+
     private static final int LOCATION_REQUEST = 1201;
+    private static final int SAVE_WIFI_REQUEST = 1401;
 
     private static final String CA_FINGERPRINT =
             "8FE4FB0AF93A4D0D67DB0BEBB23E37C7" +
@@ -53,17 +51,12 @@ public class EnterpriseFragment extends Fragment {
 
     private View rootView;
     private WifiManager wifiManager;
-    private ConnectivityManager connectivityManager;
-    private ConnectivityManager.NetworkCallback networkCallback;
 
-    private final Handler handler =
-            new Handler(Looper.getMainLooper());
+    private int selectedEap =
+            WifiEnterpriseConfig.Eap.PEAP;
 
-    private int selectedEap = WifiEnterpriseConfig.Eap.PEAP;
     private int selectedPhase2 =
             WifiEnterpriseConfig.Phase2.MSCHAPV2;
-
-    private boolean requestActive = false;
 
     @Nullable
     @Override
@@ -77,16 +70,12 @@ public class EnterpriseFragment extends Fragment {
                 container,
                 false);
 
-        Context appContext =
+        Context context =
                 requireActivity().getApplicationContext();
 
         wifiManager = (WifiManager)
-                appContext.getSystemService(
+                context.getSystemService(
                         Context.WIFI_SERVICE);
-
-        connectivityManager = (ConnectivityManager)
-                appContext.getSystemService(
-                        Context.CONNECTIVITY_SERVICE);
 
         setupSpinners();
 
@@ -105,8 +94,8 @@ public class EnterpriseFragment extends Fragment {
 
         ssidField.setText(SSID);
 
-        log("Enterprise Wi-Fi Build #13 ready.");
-        log("Direct eduroam connection test.");
+        log("Enterprise Wi-Fi Build #14 ready.");
+        log("Android system network-saving test.");
         log("Server domain: " + DOMAIN);
 
         checkCertificate();
@@ -317,14 +306,20 @@ public class EnterpriseFragment extends Fragment {
 
         try {
 
-            WifiInfo info = wifiManager.getConnectionInfo();
+            if (wifiManager == null) {
+                log("Wi-Fi service unavailable.");
+                return;
+            }
+
+            WifiInfo info =
+                    wifiManager.getConnectionInfo();
 
             if (info != null) {
 
-                log("Default Wi-Fi SSID: " +
+                log("Current Wi-Fi SSID: " +
                         info.getSSID());
 
-                log("Default Wi-Fi state: " +
+                log("Current Wi-Fi state: " +
                         info.getSupplicantState());
             }
 
@@ -336,21 +331,16 @@ public class EnterpriseFragment extends Fragment {
 
     private void connect() {
 
-        if (Build.VERSION.SDK_INT < 29) {
+        if (Build.VERSION.SDK_INT < 30) {
 
-            log("Android 10 or newer required.");
+            log("SYSTEM SAVE NOT SUPPORTED.");
+            log("Android 11 or newer required.");
             return;
         }
 
         if (!hasFineLocation()) {
 
             checkLocationPermission();
-            return;
-        }
-
-        if (connectivityManager == null) {
-
-            log("Connectivity service unavailable.");
             return;
         }
 
@@ -392,11 +382,9 @@ public class EnterpriseFragment extends Fragment {
 
         if (ca == null) {
 
-            log("Cannot connect: CA unavailable.");
+            log("Cannot continue: CA unavailable.");
             return;
         }
-
-        disconnectRequest();
 
         try {
 
@@ -404,8 +392,10 @@ public class EnterpriseFragment extends Fragment {
                     new WifiEnterpriseConfig();
 
             enterprise.setIdentity(identity);
+
             enterprise.setAnonymousIdentity(
                     "anonymous@cqu.edu.au");
+
             enterprise.setPassword(password);
 
             enterprise.setEapMethod(
@@ -415,147 +405,149 @@ public class EnterpriseFragment extends Fragment {
                     WifiEnterpriseConfig.Phase2.MSCHAPV2);
 
             enterprise.setCaCertificate(ca);
+
             enterprise.setDomainSuffixMatch(DOMAIN);
 
-            WifiNetworkSpecifier specifier =
-                    new WifiNetworkSpecifier.Builder()
+            WifiNetworkSuggestion suggestion =
+                    new WifiNetworkSuggestion.Builder()
                             .setSsid(ssid)
                             .setWpa2EnterpriseConfig(
                                     enterprise)
                             .build();
 
-            NetworkRequest request =
-                    new NetworkRequest.Builder()
-                            .addTransportType(
-                                    NetworkCapabilities.TRANSPORT_WIFI)
-                            .removeCapability(
-                                    NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                            .setNetworkSpecifier(specifier)
-                            .build();
+            ArrayList<WifiNetworkSuggestion> networks =
+                    new ArrayList<>();
 
-            networkCallback =
-                    new ConnectivityManager.NetworkCallback() {
+            networks.add(suggestion);
 
-                @Override
-                public void onAvailable(Network network) {
+            Intent intent = new Intent(
+                    "android.settings.WIFI_ADD_NETWORKS");
 
-                    handler.post(() -> {
+            intent.putParcelableArrayListExtra(
+                    "android.provider.extra.WIFI_NETWORK_LIST",
+                    networks);
 
-                        log("DIRECT CONNECTION AVAILABLE.");
-                        log("Android supplied a Wi-Fi network.");
-                        log("Network handle: " +
-                                network.getNetworkHandle());
-
-                        log("This is an app-specific network.");
-                        log("It may not replace S26.");
-
-                        reportCurrentWifi();
-                    });
-                }
-
-                @Override
-                public void onCapabilitiesChanged(
-                        Network network,
-                        NetworkCapabilities capabilities) {
-
-                    handler.post(() -> {
-
-                        if (Build.VERSION.SDK_INT >= 29) {
-
-                            Object transport =
-                                    capabilities.getTransportInfo();
-
-                            if (transport instanceof WifiInfo) {
-
-                                WifiInfo info =
-                                        (WifiInfo) transport;
-
-                                log("Requested network SSID: " +
-                                        info.getSSID());
-
-                                log("Requested network RSSI: " +
-                                        info.getRssi() + " dBm");
-                            }
-                        }
-                    });
-                }
-
-                @Override
-                public void onUnavailable() {
-
-                    handler.post(() -> {
-
-                        requestActive = false;
-
-                        log("DIRECT CONNECTION UNAVAILABLE.");
-                        log("Android did not establish");
-                        log("the requested connection.");
-                        log("This alone does not prove");
-                        log("the password is incorrect.");
-                    });
-                }
-
-                @Override
-                public void onLost(Network network) {
-
-                    handler.post(() -> {
-
-                        log("Requested Wi-Fi network lost.");
-                    });
-                }
-            };
-
-            log("Requesting direct eduroam connection.");
+            log("Requesting Android network-saving UI.");
+            log("SSID: " + ssid);
             log("PEAP/MSCHAPV2 configured.");
             log("CA and domain validation enabled.");
-            log("Watch for an Android approval prompt.");
 
-            requestActive = true;
+            PackageManager pm =
+                    requireActivity().getPackageManager();
 
-            connectivityManager.requestNetwork(
-                    request,
-                    networkCallback,
-                    60000);
+            if (intent.resolveActivity(pm) == null) {
+
+                log("No visible system handler found.");
+                log("Attempting direct system launch.");
+            }
+
+            startActivityForResult(
+                    intent,
+                    SAVE_WIFI_REQUEST);
+
+            log("System Wi-Fi interface launched.");
+            log("Approve or save eduroam if prompted.");
+
+        } catch (android.content.ActivityNotFoundException e) {
+
+            log("SYSTEM SAVE UI NOT AVAILABLE.");
+            log("Sony firmware has no handler");
+            log("for Android's Add Wi-Fi Networks UI.");
+
+        } catch (SecurityException e) {
+
+            log("SYSTEM SAVE UI BLOCKED.");
+            log("Sony firmware denied the request.");
+
+            Log.e(TAG, "Permission failure", e);
 
         } catch (Exception e) {
 
-            log("Direct request failed: " +
-                    e.getClass().getSimpleName());
+            log("System save request failed:");
+            log(e.getClass().getSimpleName());
 
-            log(String.valueOf(e.getMessage()));
+            if (e.getMessage() != null) {
 
-            Log.e(TAG, "Direct connection error", e);
+                log(e.getMessage());
+            }
 
-            disconnectRequest();
+            Log.e(TAG, "System save error", e);
         }
     }
 
-    private void disconnectRequest() {
+    @Override
+    public void onActivityResult(
+            int requestCode,
+            int resultCode,
+            Intent data) {
 
-        if (networkCallback == null) {
+        super.onActivityResult(
+                requestCode,
+                resultCode,
+                data);
+
+        if (requestCode != SAVE_WIFI_REQUEST) {
             return;
         }
 
-        try {
+        log("Returned from Android Wi-Fi UI.");
 
-            connectivityManager.unregisterNetworkCallback(
-                    networkCallback);
+        if (resultCode == Activity.RESULT_OK) {
 
-        } catch (Exception e) {
+            log("Android reported a successful result.");
 
-            Log.w(TAG, "Callback removal failed", e);
+        } else if (resultCode == Activity.RESULT_CANCELED) {
+
+            log("Android reported cancellation.");
+            log("Network may not have been saved.");
+
+        } else {
+
+            log("Android returned result: " +
+                    resultCode);
         }
 
-        networkCallback = null;
-        requestActive = false;
+        if (data != null && Build.VERSION.SDK_INT >= 30) {
+
+            int[] statuses = data.getIntArrayExtra(
+                    "android.provider.extra.WIFI_NETWORK_RESULT_LIST");
+
+            if (statuses != null) {
+
+                for (int status : statuses) {
+
+                    if (status == 0) {
+
+                        log("Network save status: SUCCESS.");
+
+                    } else if (status == 1) {
+
+                        log("Network already exists.");
+
+                    } else if (status == 2) {
+
+                        log("Network save status: ADD FAILED.");
+
+                    } else {
+
+                        log("Network save status: " +
+                                status);
+                    }
+                }
+            }
+        }
+
+        reportCurrentWifi();
+
+        log("Saving does not guarantee");
+        log("Android has switched networks.");
     }
 
     private void disconnect() {
 
-        disconnectRequest();
-
-        log("Direct connection request released.");
-        log("This does not remove saved networks.");
+        log("Build #14 uses system network saving.");
+        log("No temporary request to disconnect.");
+        log("Saved Wi-Fi networks are unchanged.");
 
         reportCurrentWifi();
     }
@@ -634,8 +626,6 @@ public class EnterpriseFragment extends Fragment {
 
     @Override
     public void onDestroyView() {
-
-        disconnectRequest();
 
         rootView = null;
 
