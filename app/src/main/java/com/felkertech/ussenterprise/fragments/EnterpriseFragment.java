@@ -1,561 +1,399 @@
+
 package com.felkertech.ussenterprise.fragments;
 
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.DialogInterface;
-import android.content.Intent;
-import android.content.IntentFilter;
-import android.graphics.PorterDuff;
-import android.net.NetworkInfo;
 import android.net.wifi.ScanResult;
-import android.net.wifi.SupplicantState;
-import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiEnterpriseConfig;
-import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.net.wifi.WifiNetworkSuggestion;
-import android.os.Bundle;
 import android.os.Build;
+import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
 import android.support.v7.app.AlertDialog;
+import android.text.InputType;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.security.KeyStore;
-import java.security.cert.X509Certificate;
-
 import com.felkertech.ussenterprise.R;
 import com.felkertech.ussenterprise.activities.MainActivity;
 import com.felkertech.ussenterprise.model.EnterpriseWifiConnection;
-import com.felkertech.ussenterprise.model.PresetConfig;
-import com.felkertech.ussenterprise.model.SavedWifiDatabase;
 import com.felkertech.ussenterprise.ui.EapSpinnerAdapter;
 import com.felkertech.ussenterprise.ui.Phase2SpinnerAdapter;
 
+import java.security.KeyStore;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Enumeration;
 import java.util.List;
 
-/**
- * Created by Nick on 4/23/2017.
- */
-
 public class EnterpriseFragment extends Fragment {
-    private String TAG = EnterpriseFragment.class.getSimpleName();
 
-    private String ssid = "";
-    private String userName = "";
-    private String passWord = "";
-    private WifiNetworkSuggestion lastSuggestion = null;
+    private static final String TAG = "EnterpriseWifi";
 
-    private BroadcastReceiver mWifiStateChangedReceiver = new BroadcastReceiver() {
-
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            int extraWifiState = intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE,
-                    WifiManager.WIFI_STATE_UNKNOWN);
-            Logd("Receive Wi-Fi update: " + extraWifiState);
-            switch (extraWifiState)
-            {
-                case WifiManager.WIFI_STATE_DISABLED:
-                    Logd("Wi-Fi disabled");
-                    break;
-                case WifiManager.WIFI_STATE_DISABLING:
-                    Logd("Wi-Fi is being disabled");
-                    break;
-                case WifiManager.WIFI_STATE_ENABLED:
-                    /*ConnectivityManager conMan = (ConnectivityManager) MainActivity.this.getSystemService(Context.CONNECTIVITY_SERVICE);
-                    if (conMan == null) {
-                        Log.e(TAG, "Con-Man is null");
-                    }
-                    while(conMan.getActiveNetworkInfo() == null || conMan.getActiveNetworkInfo().getState() != NetworkInfo.State.CONNECTED)
-                    {
-
-                        conMan = (ConnectivityManager) MainActivity.this.getSystemService(Context.CONNECTIVITY_SERVICE);
-                        Log.d(TAG, "Not connected yet?");
-                        Log.d(TAG, "" + conMan.getActiveNetworkInfo().getState() + " : " + conMan.getActiveNetworkInfo().toString());
-                        try
-                        {
-                            Thread.sleep(500);
-                        } catch (InterruptedException e)
-                        {
-                            e.printStackTrace();
-                        }
-                    }*/
-                    final WifiManager wifiManager =
-                            (WifiManager) getActivity().getApplicationContext().
-                                    getSystemService(Context.WIFI_SERVICE);
-                    Logd(wifiManager.getConnectionInfo().getSSID());
-                    Logd(wifiManager.getConnectionInfo().toString());
-                    Logd(wifiManager.getDhcpInfo().toString());
-                    Logd("Wi-Fi is enabled.");
-                    break;
-                case WifiManager.WIFI_STATE_ENABLING:
-                    Logd("Wi-Fi is being enabled.");
-                    break;
-                case WifiManager.WIFI_STATE_UNKNOWN:
-                    Logd("Wi-Fi is in an unknown state.");
-                    break;
-            }
-        }
-    };
-
-    private BroadcastReceiver mNetworkStateChangedReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            NetworkInfo networkInfo = intent.getParcelableExtra(WifiManager.EXTRA_NETWORK_INFO);
-            if (networkInfo != null) {
-                Logd("Network state changed to " + networkInfo.toString());
-            }
-            String bssid = intent.getStringExtra(WifiManager.EXTRA_BSSID);
-            if (bssid != null) {
-                Logd("Connected to " + bssid);
-            }
-            WifiInfo wifiInfo = intent.getParcelableExtra(WifiManager.EXTRA_WIFI_INFO);
-            if (wifiInfo != null) {
-                Logd("Wi-Fi Info: " + wifiInfo.toString());
-            }
-        }
-    };
-
-    private BroadcastReceiver mSupplicantStateChangeReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            SupplicantState state = intent.getParcelableExtra(WifiManager.EXTRA_SUPPLICANT_ERROR);
-            boolean connected = intent.getBooleanExtra(WifiManager.EXTRA_SUPPLICANT_CONNECTED,
-                    false);
-            if (connected) {
-                Logd("Supplicant connected? " + connected);
-            }
-            if (state != null) {
-                Logd("Supplicant state? " + state.toString());
-            }
-        }
-    };
-
-    private View.OnFocusChangeListener backgroundColorChanger = new View.OnFocusChangeListener() {
-        @Override
-        public void onFocusChange(View v, boolean hasFocus) {
-            if (hasFocus) {
-//                v.setBackgroundColor(getResources().getColor(R.color.background_on_focus));
-                v.getBackground().setColorFilter(getResources().getColor(
-                        R.color.background_on_focus), PorterDuff.Mode.SRC_ATOP);
-            } else {
-//                v.setBackgroundColor(getResources().getColor(android.R.color.transparent));
-                v.getBackground().setColorFilter(getResources().getColor(
-                        android.R.color.white), PorterDuff.Mode.SRC_ATOP);
-            }
-        }
-    };
-
-    public EnterpriseFragment() {
-    }
-
-    @Override
-    public void onStart() {
-        super.onStart();
-        ((TextView) getView().findViewById(R.id.logs)).setText("");
-        getActivity().registerReceiver(mWifiStateChangedReceiver,
-                new IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION));
-        getActivity().registerReceiver(mNetworkStateChangedReceiver,
-                new IntentFilter(WifiManager.NETWORK_STATE_CHANGED_ACTION));
-        getActivity().registerReceiver(mSupplicantStateChangeReceiver,
-                new IntentFilter(WifiManager.SUPPLICANT_STATE_CHANGED_ACTION));
-        getActivity().registerReceiver(mSupplicantStateChangeReceiver,
-                new IntentFilter(WifiManager.SUPPLICANT_CONNECTION_CHANGE_ACTION));
-        loadSsids();
-    }
-
-    public void loadSsids() {
-        List<String> enterpriseSsids = getEnterpriseSsids();
-        Log.d(TAG, "There are " + enterpriseSsids.size() + " enterprise SSIDs nearby.");
-        if (enterpriseSsids.size() == 1) {
-            ((EditText) getView().findViewById(R.id.ssid_edit)).setText(enterpriseSsids.get(0));
-        }
-    }
+    private View rootView;
+    private WifiManager wifiManager;
+    private int selectedEap = WifiEnterpriseConfig.Eap.PEAP;
+    private int selectedPhase2 =
+            WifiEnterpriseConfig.Phase2.MSCHAPV2;
 
     @Nullable
     @Override
-    public View onCreateView(LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
-        final View baseLayout = inflater.inflate(R.layout.activity_main, null);
+    public View onCreateView(
+            LayoutInflater inflater,
+            @Nullable ViewGroup container,
+            @Nullable Bundle state) {
 
-        final int[] eap = new int[1];
-        final int[] phase2 = new int[1];
+        rootView = inflater.inflate(
+                R.layout.activity_main, container, false);
 
-        final EapSpinnerAdapter eapSpinner = new EapSpinnerAdapter(getActivity());
-        ((Spinner) baseLayout.findViewById(R.id.eap)).setAdapter(eapSpinner);
-        baseLayout.findViewById(R.id.eap).setOnFocusChangeListener(backgroundColorChanger);
-        ((Spinner) baseLayout.findViewById(R.id.eap))
-                .setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(AdapterView<?> parent, View view, int position,
-                                               long id) {
-                        eap[0] = (int) id;
-                    }
-
-                    @Override
-                    public void onNothingSelected(AdapterView<?> parent) {
-                    }
-                });
-
-        Phase2SpinnerAdapter phase2Spinner = new Phase2SpinnerAdapter(getActivity());
-        ((Spinner) baseLayout.findViewById(R.id.phase2)).setAdapter(phase2Spinner);
-        baseLayout.findViewById(R.id.phase2).setOnFocusChangeListener(backgroundColorChanger);
-        ((Spinner) baseLayout.findViewById(R.id.phase2))
-                .setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(AdapterView<?> parent, View view, int position,
-                                               long id) {
-                        phase2[0] = (int) id;
-                    }
-
-                    @Override
-                    public void onNothingSelected(AdapterView<?> parent) {
-                    }
-                });
-
-        baseLayout.findViewById(R.id.button_connect).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                ssid = ((EditText) baseLayout.findViewById(R.id.ssid_edit)).getText().toString();
-                userName = ((EditText) baseLayout.findViewById(R.id.identity)).getText().toString();
-                passWord = ((EditText) baseLayout.findViewById(R.id.password)).getText().toString();
-                try {
-                    EnterpriseWifiConnection connection = new EnterpriseWifiConnection.Builder()
-                            .setSsid(ssid)
-                            .setIdentity(userName)
-                            .setPassword(passWord)
-                            .setEap(eap[0])
-                            .setPhase2(phase2[0])
-                            .build();
-                    connect(connection);
-                } catch (IllegalArgumentException e) {
-                    Toast.makeText(getActivity(), e.getMessage(), Toast.LENGTH_SHORT).show();
-                }
-            }
-        });
-        
-        // Setup preset button
-        final PresetConfig presetConfig = PresetConfig.loadFromResource(getActivity());
-        if (presetConfig.isEnabled()) {
-            baseLayout.findViewById(R.id.button_connect_preset).setVisibility(View.VISIBLE);
-            baseLayout.findViewById(R.id.button_connect_preset).setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    try {
-                        EnterpriseWifiConnection connection = presetConfig.toWifiConnection();
-                        Logd("Connecting to preset network: " + presetConfig.getSsid());
-                        connect(connection);
-                    } catch (Exception e) {
-                        Toast.makeText(getActivity(), "Preset connection failed: " + e.getMessage(), 
-                                Toast.LENGTH_SHORT).show();
-                        Log.e(TAG, "Preset connection error", e);
-                    }
-                }
-            });
-        }
-        
-        // Setup disconnect button
-        baseLayout.findViewById(R.id.button_disconnect).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                disconnect();
-            }
-        });
-        
-        printSavedWifiNetworks();
-
-        return baseLayout;
-    }
-
-    public void connect(EnterpriseWifiConnection connection) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            connectWithSuggestion(connection);
-            return;
-        }
-
-        WifiEnterpriseConfig enterpriseConfig = buildEnterpriseConfig(connection);
-        WifiConfiguration wifiConfig = new WifiConfiguration();
-        wifiConfig.SSID = "\"" + connection.getSsid() + "\"";
-        wifiConfig.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_EAP);
-        wifiConfig.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.IEEE8021X);
-        wifiConfig.enterpriseConfig = enterpriseConfig;
-
-        Logd("Create connection to '" + connection.getSsid() + "'");
-        SavedWifiDatabase.getInstance(getActivity()).addNetwork(connection);
-
-        addNetwork(wifiConfig);
-    }
-
-    private WifiEnterpriseConfig buildEnterpriseConfig(EnterpriseWifiConnection connection) {
-        WifiEnterpriseConfig enterpriseConfig = new WifiEnterpriseConfig();
-        enterpriseConfig.setIdentity(connection.getIdentity());
-        enterpriseConfig.setPassword(connection.getPassword());
-
-        if ("UofT".equalsIgnoreCase(connection.getSsid())) {
-            enterpriseConfig.setEapMethod(WifiEnterpriseConfig.Eap.PEAP);
-            enterpriseConfig.setPhase2Method(WifiEnterpriseConfig.Phase2.MSCHAPV2);
-            enterpriseConfig.setAnonymousIdentity("");
-        } else {
-            enterpriseConfig.setEapMethod(connection.getEap());
-            enterpriseConfig.setPhase2Method(connection.getPhase2());
-        }
-        return enterpriseConfig;
-    }
-
-    private void connectWithSuggestion(EnterpriseWifiConnection connection) {
-        WifiManager wifiManager = (WifiManager) getActivity().getApplicationContext()
+        wifiManager = (WifiManager) requireActivity()
+                .getApplicationContext()
                 .getSystemService(Context.WIFI_SERVICE);
-        if (wifiManager == null) {
-            Toast.makeText(getActivity(), "Wi-Fi service unavailable", Toast.LENGTH_LONG).show();
+
+        Spinner eap = rootView.findViewById(R.id.eap);
+        Spinner phase2 = rootView.findViewById(R.id.phase2);
+
+        eap.setAdapter(new EapSpinnerAdapter(getActivity()));
+        phase2.setAdapter(new Phase2SpinnerAdapter(getActivity()));
+
+        eap.setOnItemSelectedListener(
+                new android.widget.AdapterView.OnItemSelectedListener() {
+                    public void onItemSelected(
+                            android.widget.AdapterView<?> parent,
+                            View view, int position, long id) {
+                        selectedEap = (int) id;
+                    }
+
+                    public void onNothingSelected(
+                            android.widget.AdapterView<?> parent) {}
+                });
+
+        phase2.setOnItemSelectedListener(
+                new android.widget.AdapterView.OnItemSelectedListener() {
+                    public void onItemSelected(
+                            android.widget.AdapterView<?> parent,
+                            View view, int position, long id) {
+                        selectedPhase2 = (int) id;
+                    }
+
+                    public void onNothingSelected(
+                            android.widget.AdapterView<?> parent) {}
+                });
+
+        rootView.findViewById(R.id.button_connect)
+                .setOnClickListener(v -> prepareConnection());
+
+        rootView.findViewById(R.id.button_disconnect)
+                .setOnClickListener(v -> removeSuggestions());
+
+        rootView.findViewById(R.id.button_connect_preset)
+                .setVisibility(View.GONE);
+
+        EditText ssid = rootView.findViewById(R.id.ssid_edit);
+        ssid.setText("eduroam");
+
+        showMessage("Android TV enterprise Wi-Fi ready.");
+        showMessage("Certificate validation is required.");
+
+        return rootView;
+    }
+
+    private void prepareConnection() {
+        if (rootView == null || wifiManager == null) {
             return;
         }
 
-        WifiEnterpriseConfig enterpriseConfig = buildEnterpriseConfig(connection);
-        WifiNetworkSuggestion suggestion = new WifiNetworkSuggestion.Builder()
-                .setSsid(connection.getSsid())
-                .setWpa2EnterpriseConfig(enterpriseConfig)
-                .setIsAppInteractionRequired(true)
-                .build();
-        List<WifiNetworkSuggestion> suggestions = Collections.singletonList(suggestion);
-        int status = wifiManager.addNetworkSuggestions(suggestions);
-        if (status != WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
-            Logd("Suggestion error: " + status);
-            Toast.makeText(getActivity(), "Failed to add network suggestion", Toast.LENGTH_LONG).show();
-        } else {
-            lastSuggestion = suggestion;
-            Toast.makeText(getActivity(), "Suggestion added. Confirm in Wi-Fi settings", Toast.LENGTH_LONG).show();
-        }
-    }
+        EditText ssidInput =
+                rootView.findViewById(R.id.ssid_edit);
+        EditText identityInput =
+                rootView.findViewById(R.id.identity);
+        EditText passwordInput =
+                rootView.findViewById(R.id.password);
 
-    public void disconnect() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            disconnectSuggestion();
-        } else {
-            disconnectNetwork();
-        }
-    }
+        String ssid = ssidInput.getText().toString()
+                .trim().replaceAll("^\"|\"$", "");
+        String identity = identityInput.getText().toString().trim();
+        String password = passwordInput.getText().toString();
 
-    private void disconnectSuggestion() {
-        // This method is for Android 10+ (API 29+) only
+        if (ssid.isEmpty() || identity.isEmpty()
+                || password.isEmpty()) {
+            showMessage("Enter SSID, identity and password.");
+            return;
+        }
+
+        if (selectedEap != WifiEnterpriseConfig.Eap.PEAP ||
+                selectedPhase2 !=
+                        WifiEnterpriseConfig.Phase2.MSCHAPV2) {
+            showMessage("This test build supports PEAP/MSCHAPV2.");
+            return;
+        }
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            Toast.makeText(getActivity(), "This method requires Android 10 or higher", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        
-        WifiManager wifiManager = (WifiManager) getActivity().getApplicationContext()
-                .getSystemService(Context.WIFI_SERVICE);
-        if (wifiManager == null) {
-            Toast.makeText(getActivity(), "Wi-Fi service unavailable", Toast.LENGTH_LONG).show();
+            showMessage("Android 10 or newer is required.");
             return;
         }
 
-        List<WifiNetworkSuggestion> suggestionsToRemove = new ArrayList<>();
-        
-        // Android 11+ (API 30+): Can retrieve all suggestions from previous sessions
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            List<WifiNetworkSuggestion> allSuggestions = wifiManager.getNetworkSuggestions();
-            if (allSuggestions != null && !allSuggestions.isEmpty()) {
-                suggestionsToRemove.addAll(allSuggestions);
-                Logd("Found " + allSuggestions.size() + " network suggestion(s) to remove");
-            }
-        }
-        
-        // For Android 10+ (API 29+): Pass empty list to remove ALL network suggestions
-        // According to Android API docs, removeNetworkSuggestions with an empty list
-        // removes all suggestions added by this app, even after app restart
-        int status = wifiManager.removeNetworkSuggestions(suggestionsToRemove);
-        if (status == WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
-            Logd("Network suggestion(s) removed successfully");
-            String message = suggestionsToRemove.isEmpty() 
-                    ? "All network suggestions removed" 
-                    : "Removed " + suggestionsToRemove.size() + " network suggestion(s)";
-            Toast.makeText(getActivity(), message, Toast.LENGTH_LONG).show();
-            lastSuggestion = null;
-        } else {
-            Logd("Failed to remove network suggestion(s): " + status);
-            Toast.makeText(getActivity(), "Failed to remove network suggestion(s)", 
-                    Toast.LENGTH_LONG).show();
-        }
+        EnterpriseWifiConnection connection =
+                new EnterpriseWifiConnection.Builder()
+                        .setSsid(ssid)
+                        .setIdentity(identity)
+                        .setPassword(password)
+                        .setEap(selectedEap)
+                        .setPhase2(selectedPhase2)
+                        .build();
+
+        requestServerDomain(connection);
     }
 
-    private void disconnectNetwork() {
-        WifiManager wifiManager = (WifiManager) getActivity().getApplicationContext()
-                .getSystemService(Context.WIFI_SERVICE);
-                
-        if (wifiManager == null) {
-            Toast.makeText(getActivity(), "Wi-Fi service unavailable", Toast.LENGTH_LONG).show();
-            return;
-        }
-    
-        // For Android 9 and below: Use legacy WifiConfiguration API
-        List<WifiConfiguration> configuredNetworks = wifiManager.getConfiguredNetworks();
-        if (configuredNetworks == null || configuredNetworks.isEmpty()) {
-            Toast.makeText(getActivity(), "No configured networks found", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        
-        boolean removed = false;
-        for (WifiConfiguration config : configuredNetworks) {
-            if (config.SSID != null && config.SSID.equals("\"" + ssid + "\"")) {
-                wifiManager.removeNetwork(config.networkId);
-                wifiManager.saveConfiguration();
-                Logd("Network removed: " + ssid);
-                Toast.makeText(getActivity(), "Network removed: " + ssid, Toast.LENGTH_LONG).show();
-                removed = true;
-                break;
-            }
-        }
-        
-        if (!removed) {
-            Toast.makeText(getActivity(), "Network not found: " + ssid, Toast.LENGTH_SHORT).show();
-        }
+    private void requestServerDomain(
+            EnterpriseWifiConnection connection) {
+
+        EditText input = new EditText(requireActivity());
+        input.setSingleLine(true);
+        input.setInputType(
+                InputType.TYPE_CLASS_TEXT |
+                InputType.TYPE_TEXT_VARIATION_URI);
+        input.setHint("Authentication server domain");
+
+        new AlertDialog.Builder(requireActivity())
+                .setTitle("Server certificate domain")
+                .setMessage(
+                        "Enter the authentication server domain " +
+                        "supplied by your institution. " +
+                        "This is not necessarily your email domain.")
+                .setView(input)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Next", (dialog, which) -> {
+                    String domain = input.getText()
+                            .toString().trim();
+
+                    if (domain.isEmpty() ||
+                            domain.contains(" ") ||
+                            !domain.contains(".")) {
+                        showMessage("A valid server domain is required.");
+                        return;
+                    }
+
+                    selectCertificate(connection, domain);
+                })
+                .show();
     }
 
+    private void selectCertificate(
+            EnterpriseWifiConnection connection,
+            String domain) {
 
-    public void addNetwork(WifiConfiguration configuration) {
-        WifiManager wifiManager = (WifiManager) getActivity().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        if (wifiManager == null) {
-            Toast.makeText(getActivity(), "Wi-Fi service unavailable", Toast.LENGTH_LONG).show();
-            return;
-        }
+        List<String> aliases = new ArrayList<>();
+        List<X509Certificate> certificates = new ArrayList<>();
+
         try {
-            int id = wifiManager.addNetwork(configuration);
-            if (id == -1) {
-                Toast.makeText(getActivity(), "Failed to add network", Toast.LENGTH_LONG).show();
+            KeyStore store =
+                    KeyStore.getInstance("AndroidCAStore");
+            store.load(null);
+
+            Enumeration<String> names = store.aliases();
+
+            while (names.hasMoreElements()) {
+                String alias = names.nextElement();
+
+                java.security.cert.Certificate cert =
+                        store.getCertificate(alias);
+
+                if (cert instanceof X509Certificate) {
+                    aliases.add(alias);
+                    certificates.add((X509Certificate) cert);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Certificate store unavailable", e);
+            showMessage("Unable to read trusted certificates.");
+            return;
+        }
+
+        if (certificates.isEmpty()) {
+            showMessage("No trusted CA certificates available.");
+            return;
+        }
+
+        String[] labels = new String[certificates.size()];
+
+        for (int i = 0; i < certificates.size(); i++) {
+            labels[i] = aliases.get(i) + "\n" +
+                    certificates.get(i).getSubjectX500Principal()
+                            .getName();
+        }
+
+        new AlertDialog.Builder(requireActivity())
+                .setTitle("Select trusted CA certificate")
+                .setMessage(
+                        "Only choose the CA confirmed by your " +
+                        "institution. Do not guess.")
+                .setItems(labels, (dialog, index) -> {
+                    confirmConfiguration(
+                            connection,
+                            domain,
+                            certificates.get(index));
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void confirmConfiguration(
+            EnterpriseWifiConnection connection,
+            String domain,
+            X509Certificate certificate) {
+
+        new AlertDialog.Builder(requireActivity())
+                .setTitle("Confirm enterprise Wi-Fi")
+                .setMessage(
+                        "Network: " + connection.getSsid() +
+                        "\nServer domain: " + domain +
+                        "\nCA issuer: " +
+                        certificate.getIssuerX500Principal().getName() +
+                        "\n\nOnly continue if both certificate " +
+                        "and domain match the official configuration.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Configure", (dialog, which) ->
+                        addSuggestion(connection, domain, certificate))
+                .show();
+    }
+
+    private void addSuggestion(
+            EnterpriseWifiConnection connection,
+            String domain,
+            X509Certificate certificate) {
+
+        try {
+            WifiEnterpriseConfig config =
+                    new WifiEnterpriseConfig();
+
+            config.setIdentity(connection.getIdentity());
+            config.setPassword(connection.getPassword());
+            config.setEapMethod(WifiEnterpriseConfig.Eap.PEAP);
+            config.setPhase2Method(
+                    WifiEnterpriseConfig.Phase2.MSCHAPV2);
+            config.setDomainSuffixMatch(domain);
+            config.setCaCertificate(certificate);
+
+            WifiNetworkSuggestion suggestion =
+                    new WifiNetworkSuggestion.Builder()
+                            .setSsid(connection.getSsid())
+                            .setWpa2EnterpriseConfig(config)
+                            .build();
+
+            int result = wifiManager.addNetworkSuggestions(
+                    Collections.singletonList(suggestion));
+
+            if (result ==
+                    WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
+                showMessage("Network suggestion added.");
+                showMessage(
+                        "Approve the connection if Android prompts.");
+            } else {
+                showMessage("Wi-Fi suggestion failed: " + result);
+            }
+
+        } catch (Exception e) {
+            Log.e(TAG, "Enterprise Wi-Fi setup failed", e);
+            showMessage(
+                    "Configuration failed. Check the certificate " +
+                    "and Android permissions.");
+        }
+    }
+
+    private void removeSuggestions() {
+        if (wifiManager == null) {
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return;
+        }
+
+        try {
+            int result = wifiManager.removeNetworkSuggestions(
+                    Collections.emptyList());
+
+            showMessage(
+                    result == WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS
+                            ? "This app's suggestions removed."
+                            : "Removal failed: " + result);
+        } catch (Exception e) {
+            Log.e(TAG, "Removal failed", e);
+            showMessage("Unable to remove suggestions.");
+        }
+    }
+
+    public void loadSsids() {
+        if (rootView == null || wifiManager == null) {
+            return;
+        }
+
+        try {
+            MainActivity activity = (MainActivity) getActivity();
+
+            if (activity == null) {
                 return;
             }
-            Logd("Add network '" + configuration.SSID + "' to Wi-Fi Manager");
-            rescanAndConnect();
+
+            if (!activity.grantedLocationPermission()) {
+                activity.requestLocationPermission();
+                return;
+            }
+
+            List<ScanResult> results = wifiManager.getScanResults();
+
+            if (results == null) {
+                return;
+            }
+
+            List<String> networks = new ArrayList<>();
+
+            for (ScanResult result : results) {
+                if (result.SSID != null &&
+                        result.capabilities.contains("EAP") &&
+                        !networks.contains(result.SSID)) {
+                    networks.add(result.SSID);
+                }
+            }
+
+            if (networks.size() == 1) {
+                EditText input =
+                        rootView.findViewById(R.id.ssid_edit);
+                input.setText(networks.get(0));
+            }
+
         } catch (SecurityException e) {
-            Logd("Add network security exception: " + e.getMessage());
-            Toast.makeText(getActivity(), "Permission denied to add network", Toast.LENGTH_LONG).show();
+            showMessage("Wi-Fi scanning permission denied.");
         } catch (Exception e) {
-            Logd("Error adding network: " + e.getMessage());
-            Toast.makeText(getActivity(), "Unable to add network", Toast.LENGTH_LONG).show();
+            Log.e(TAG, "Network scan failed", e);
         }
     }
 
-    private X509Certificate findCaCertificate(String name) {
-        try {
-            KeyStore ks = KeyStore.getInstance("AndroidCAStore");
-            ks.load(null);
-            java.util.Enumeration<String> aliases = ks.aliases();
-            while (aliases.hasMoreElements()) {
-                String alias = aliases.nextElement();
-                if (alias.toLowerCase().contains(name.toLowerCase())) {
-                    return (X509Certificate) ks.getCertificate(alias);
-                }
-            }
-        } catch (Exception e) {
-            Logd("Failed to find CA certificate: " + e.getMessage());
-        }
-        return null;
-    }
+    private void showMessage(String message) {
+        if (rootView != null) {
+            TextView logs = rootView.findViewById(R.id.logs);
 
-    public void printSavedWifiNetworks() {
-        final WifiManager wifiManager = (WifiManager) getActivity().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        if (wifiManager == null) {
-            Logd("Wi-Fi service unavailable");
-            return;
-        }
-        List<WifiConfiguration> list = wifiManager.getConfiguredNetworks();
-        if (list != null) {
-            for (WifiConfiguration i : list) {
-                Log.d(TAG, "Found wifi " + i.SSID);
-                Wifid(i.SSID);
+            if (logs != null) {
+                logs.setText(message + "\n\n" + logs.getText());
             }
         }
-    }
 
-    public void rescanAndConnect() {
-        final WifiManager wifiManager = (WifiManager) getActivity().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        if (wifiManager == null) {
-            Logd("Wi-Fi service unavailable");
-            return;
-        }
-        List<WifiConfiguration> list = wifiManager.getConfiguredNetworks();
-        if (list == null) {
-            Logd("No configured networks found");
-            return;
-        }
-        for (WifiConfiguration i : list) {
-            Log.d(TAG, "Found wifi " + i.SSID);
-            if(i.SSID != null && i.SSID.equals("\"" + ssid + "\"")) {
-                wifiManager.disconnect();
-                wifiManager.enableNetwork(i.networkId, true);
-                wifiManager.reconnect();
-                Logd("Connecting to network");
-                /*new Handler().postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        // What do we connect to?
-                        Logd(wifiManager.getConnectionInfo().getSSID());
-                        Logd(wifiManager.getConnectionInfo().toString());
-                        Logd(wifiManager.getDhcpInfo().toString());
-                        Logd(String.valueOf(wifiManager.getConnectionInfo().getNetworkId()));
-                    }
-                }, 1000 * 5);*/
-                break;
-            }
-        }
-    }
-
-    private List<String> getEnterpriseSsids() {
-        // Check permission
-        List<String> ssids = new ArrayList<>();
-        if (!((MainActivity) getActivity()).grantedLocationPermission()) {
-            ((MainActivity) getActivity()).requestLocationPermission();
-        } else {
-            final WifiManager wifiManager = (WifiManager) getActivity().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-            if (wifiManager == null) {
-                Logd("Wi-Fi service unavailable");
-                return ssids;
-            }
-            List<ScanResult> scanResults = wifiManager.getScanResults();
-            if (scanResults != null) {
-                for (ScanResult scanResult : scanResults) {
-                    Log.d(TAG , scanResult.SSID + " " + scanResult.capabilities);
-                    if (scanResult.capabilities.contains("EAP") && !ssids.contains(scanResult.SSID)) {
-                        ssids.add(scanResult.SSID);
-                    }
-                }
-            }
-        }
-        return ssids;
+        Log.i(TAG, message);
     }
 
     @Override
-    public void onStop() {
-        super.onStop();
-        getActivity().unregisterReceiver(mWifiStateChangedReceiver);
-        getActivity().unregisterReceiver(mNetworkStateChangedReceiver);
-        getActivity().unregisterReceiver(mSupplicantStateChangeReceiver);
-    }
-
-    private void Logd(String log) {
-        if (getView() == null) {
-            Toast.makeText(getContext(), log, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        TextView logView = ((TextView) getView().findViewById(R.id.logs));
-        logView.setText(log + "\n\n" + logView.getText());
-    }
-
-    private void Wifid(String log) {
-        if (getView() == null) {
-            Toast.makeText(getContext(), log, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        TextView logView = ((TextView) getView().findViewById(R.id.wifi_list));
-        logView.setText(log + "          " + logView.getText());
+    public void onDestroyView() {
+        super.onDestroyView();
+        rootView = null;
     }
 }
