@@ -1,0 +1,9 @@
+
+{
+  "enabled": false,
+  "ssid": "",
+  "username": "",
+  "password": "",
+  "eap": "PEAP",
+  "phase2": "MSCHAPV2"
+}
