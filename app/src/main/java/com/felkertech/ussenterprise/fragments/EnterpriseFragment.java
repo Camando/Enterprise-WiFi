@@ -1,11 +1,7 @@
 
 package com.felkertech.ussenterprise.fragments;
 
-import android.app.Activity;
-import android.content.ActivityNotFoundException;
 import android.content.Context;
-import android.content.Intent;
-import android.net.Uri;
 import android.net.wifi.ScanResult;
 import android.net.wifi.WifiEnterpriseConfig;
 import android.net.wifi.WifiManager;
@@ -15,7 +11,6 @@ import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
 import android.support.v7.app.AlertDialog;
-import android.text.InputType;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -31,9 +26,7 @@ import com.felkertech.ussenterprise.model.EnterpriseWifiConnection;
 import com.felkertech.ussenterprise.ui.EapSpinnerAdapter;
 import com.felkertech.ussenterprise.ui.Phase2SpinnerAdapter;
 
-import java.io.InputStream;
 import java.security.KeyStore;
-import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -43,15 +36,14 @@ import java.util.List;
 public class EnterpriseFragment extends Fragment {
 
     private static final String TAG = "EnterpriseWifi";
-    private static final int PICK_CA_FILE = 7101;
-    private static final String DEFAULT_SSID = "eduroam";
-    private static final String DEFAULT_DOMAIN = "cqu.edu.au";
+    private static final String SSID = "eduroam";
+    private static final String DOMAIN = "cqu.edu.au";
 
     private View rootView;
     private WifiManager wifiManager;
 
     private EnterpriseWifiConnection pendingConnection;
-    private String pendingDomain;
+    private WifiNetworkSuggestion activeSuggestion;
 
     private int selectedEap =
             WifiEnterpriseConfig.Eap.PEAP;
@@ -84,14 +76,23 @@ public class EnterpriseFragment extends Fragment {
         rootView.findViewById(R.id.button_connect_preset)
                 .setVisibility(View.GONE);
 
-        EditText ssid =
+        EditText ssidField =
                 rootView.findViewById(R.id.ssid_edit);
 
-        ssid.setText(DEFAULT_SSID);
+        ssidField.setText(SSID);
 
-        showMessage("Enterprise Wi-Fi Build #8 ready.");
-        showMessage("Default domain: " + DEFAULT_DOMAIN);
-        showMessage("CA certificate validation required.");
+        showMessage("Enterprise Wi-Fi Build #9 ready.");
+        showMessage("Domain: " + DOMAIN);
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            showMessage("Android TOFU API available.");
+
+            if (wifiManager.isTrustOnFirstUseSupported()) {
+                showMessage("Device reports TOFU support.");
+            } else {
+                showMessage("Device does not support TOFU.");
+            }
+        }
 
         return rootView;
     }
@@ -102,6 +103,7 @@ public class EnterpriseFragment extends Fragment {
         Spinner phase2 = rootView.findViewById(R.id.phase2);
 
         eap.setAdapter(new EapSpinnerAdapter(getActivity()));
+
         phase2.setAdapter(
                 new Phase2SpinnerAdapter(getActivity()));
 
@@ -114,6 +116,7 @@ public class EnterpriseFragment extends Fragment {
                             View view,
                             int position,
                             long id) {
+
                         selectedEap = (int) id;
                     }
 
@@ -131,6 +134,7 @@ public class EnterpriseFragment extends Fragment {
                             View view,
                             int position,
                             long id) {
+
                         selectedPhase2 = (int) id;
                     }
 
@@ -142,24 +146,17 @@ public class EnterpriseFragment extends Fragment {
 
     private void prepareConnection() {
 
-        if (rootView == null || wifiManager == null) {
-            return;
-        }
-
         EditText ssidField =
                 rootView.findViewById(R.id.ssid_edit);
+
         EditText identityField =
                 rootView.findViewById(R.id.identity);
+
         EditText passwordField =
                 rootView.findViewById(R.id.password);
 
-        String ssid = ssidField.getText().toString().trim();
-
-        if (ssid.length() >= 2 &&
-                ssid.startsWith("\"") &&
-                ssid.endsWith("\"")) {
-            ssid = ssid.substring(1, ssid.length() - 1);
-        }
+        String ssid =
+                ssidField.getText().toString().trim();
 
         String identity =
                 identityField.getText().toString().trim();
@@ -170,6 +167,7 @@ public class EnterpriseFragment extends Fragment {
         if (ssid.isEmpty() ||
                 identity.isEmpty() ||
                 password.isEmpty()) {
+
             showMessage("Enter SSID, identity and password.");
             return;
         }
@@ -177,12 +175,8 @@ public class EnterpriseFragment extends Fragment {
         if (selectedEap != WifiEnterpriseConfig.Eap.PEAP ||
                 selectedPhase2 !=
                 WifiEnterpriseConfig.Phase2.MSCHAPV2) {
-            showMessage("Only PEAP/MSCHAPV2 supported.");
-            return;
-        }
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            showMessage("Android 10 or newer required.");
+            showMessage("Select PEAP and MSCHAPV2.");
             return;
         }
 
@@ -195,144 +189,68 @@ public class EnterpriseFragment extends Fragment {
                         .setPhase2(selectedPhase2)
                         .build();
 
-        requestServerDomain();
+        if (Build.VERSION.SDK_INT >= 33 &&
+                wifiManager.isTrustOnFirstUseSupported()) {
+
+            new AlertDialog.Builder(requireActivity())
+                    .setTitle("Connect to eduroam")
+                    .setMessage(
+                            "Use Android Trust on First Use.\n\n" +
+                            "Android may ask you to approve " +
+                            "the network certificate.\n\n" +
+                            "Only approve it if the certificate " +
+                            "and server identity match " +
+                            "CQUniversity's trusted details.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Configure",
+                            (d, w) -> connectWithTofu())
+                    .show();
+
+        } else {
+            showMessage("TOFU unavailable.");
+            selectSystemCertificate();
+        }
     }
 
-    private void requestServerDomain() {
+    private WifiEnterpriseConfig makeConfig() {
 
-        EditText input = new EditText(requireActivity());
-        input.setSingleLine(true);
+        WifiEnterpriseConfig config =
+                new WifiEnterpriseConfig();
 
-        input.setInputType(
-                InputType.TYPE_CLASS_TEXT |
-                InputType.TYPE_TEXT_VARIATION_URI);
+        config.setIdentity(
+                pendingConnection.getIdentity());
 
-        input.setText(DEFAULT_DOMAIN);
-        input.setSelection(input.length());
+        config.setPassword(
+                pendingConnection.getPassword());
 
-        new AlertDialog.Builder(requireActivity())
-                .setTitle("Server certificate domain")
-                .setMessage(
-                        "Confirm the authentication server domain. " +
-                        "For CQUniversity, the default is " +
-                        DEFAULT_DOMAIN + ".")
-                .setView(input)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Next", (dialog, which) -> {
+        config.setEapMethod(
+                WifiEnterpriseConfig.Eap.PEAP);
 
-                    String domain =
-                            input.getText().toString().trim();
+        config.setPhase2Method(
+                WifiEnterpriseConfig.Phase2.MSCHAPV2);
 
-                    if (domain.isEmpty() ||
-                            domain.contains(" ") ||
-                            !domain.contains(".")) {
-                        showMessage("Valid server domain required.");
-                        return;
-                    }
+        config.setDomainSuffixMatch(DOMAIN);
 
-                    pendingDomain = domain;
-                    chooseCertificateSource();
-                })
-                .show();
+        return config;
     }
 
-    private void chooseCertificateSource() {
-
-        String[] options = {
-                "Import CA certificate file",
-                "Choose Android trusted CA"
-        };
-
-        new AlertDialog.Builder(requireActivity())
-                .setTitle("Certificate source")
-                .setItems(options, (dialog, which) -> {
-                    if (which == 0) {
-                        importCertificate();
-                    } else {
-                        selectSystemCertificate();
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void importCertificate() {
-
-        Intent intent =
-                new Intent(Intent.ACTION_OPEN_DOCUMENT);
-
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
+    private void connectWithTofu() {
 
         try {
-            startActivityForResult(intent, PICK_CA_FILE);
-        } catch (ActivityNotFoundException e) {
-            showMessage(
-                    "No file picker installed on this TV.");
-        }
-    }
+            WifiEnterpriseConfig config = makeConfig();
 
-    @Override
-    public void onActivityResult(
-            int requestCode,
-            int resultCode,
-            Intent data) {
-
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (requestCode != PICK_CA_FILE ||
-                resultCode != Activity.RESULT_OK ||
-                data == null ||
-                data.getData() == null) {
-            return;
-        }
-
-        if (pendingConnection == null ||
-                pendingDomain == null) {
-            showMessage("Start configuration again.");
-            return;
-        }
-
-        try {
-            Uri uri = data.getData();
-
-            CertificateFactory factory =
-                    CertificateFactory.getInstance("X.509");
-
-            X509Certificate certificate;
-
-            try (InputStream stream =
-                    requireActivity()
-                            .getContentResolver()
-                            .openInputStream(uri)) {
-
-                if (stream == null) {
-                    showMessage("Unable to open certificate file.");
-                    return;
-                }
-
-                certificate = (X509Certificate)
-                        factory.generateCertificate(stream);
+            if (Build.VERSION.SDK_INT >= 33) {
+                config.enableTrustOnFirstUse(true);
             }
 
-            validateCertificate(certificate);
-            confirmConfiguration(certificate);
+            showMessage("TOFU enabled.");
+
+            registerSuggestion(config);
 
         } catch (Exception e) {
-            Log.e(TAG, "Certificate import failed", e);
-            showMessage(
-                    "Unable to import a valid CA certificate.");
-        }
-    }
-
-    private void validateCertificate(
-            X509Certificate certificate) throws Exception {
-
-        certificate.checkValidity();
-
-        if (certificate.getBasicConstraints() < 0) {
-            throw new IllegalArgumentException(
-                    "The selected file is not a CA certificate.");
+            Log.e(TAG, "TOFU failed", e);
+            showMessage("TOFU error: " + e.getMessage());
+            selectSystemCertificate();
         }
     }
 
@@ -341,7 +259,8 @@ public class EnterpriseFragment extends Fragment {
         final List<X509Certificate> certificates =
                 new ArrayList<>();
 
-        final List<String> labels = new ArrayList<>();
+        final List<String> labels =
+                new ArrayList<>();
 
         try {
             KeyStore store =
@@ -360,27 +279,27 @@ public class EnterpriseFragment extends Fragment {
 
                 if (cert instanceof X509Certificate) {
 
-                    X509Certificate x509 =
+                    X509Certificate ca =
                             (X509Certificate) cert;
 
-                    if (x509.getBasicConstraints() >= 0) {
-                        certificates.add(x509);
+                    if (ca.getBasicConstraints() >= 0) {
+
+                        certificates.add(ca);
 
                         labels.add(
-                                x509.getSubjectX500Principal()
+                                ca.getSubjectX500Principal()
                                         .getName());
                     }
                 }
             }
 
         } catch (Exception e) {
-            Log.e(TAG, "CA loading failed", e);
-            showMessage("Unable to load CA certificates.");
+            showMessage("CA loading failed.");
             return;
         }
 
         if (certificates.isEmpty()) {
-            showMessage("No trusted CA certificates found.");
+            showMessage("No CA certificates found.");
             return;
         }
 
@@ -388,11 +307,12 @@ public class EnterpriseFragment extends Fragment {
 
         AlertDialog dialog =
                 new AlertDialog.Builder(requireActivity())
-                        .setTitle("Select trusted CA certificate")
+                        .setTitle("Select verified CA")
                         .setSingleChoiceItems(
                                 labels.toArray(new String[0]),
                                 -1,
-                                (d, index) -> selected[0] = index)
+                                (d, index) ->
+                                        selected[0] = index)
                         .setNegativeButton("Cancel", null)
                         .setPositiveButton("Next", null)
                         .create();
@@ -403,138 +323,139 @@ public class EnterpriseFragment extends Fragment {
                     .setOnClickListener(v -> {
 
                         if (selected[0] < 0) {
-                            showMessage("Select a certificate.");
+                            showMessage("Select a CA.");
                             return;
                         }
 
-                        X509Certificate certificate =
+                        X509Certificate ca =
                                 certificates.get(selected[0]);
 
                         dialog.dismiss();
 
-                        try {
-                            validateCertificate(certificate);
-                            confirmConfiguration(certificate);
-                        } catch (Exception e) {
-                            showMessage(
-                                    "Certificate expired or invalid.");
-                        }
+                        confirmCertificate(ca);
                     });
         });
 
         dialog.show();
     }
 
-    private void confirmConfiguration(
-            X509Certificate certificate) {
-
-        if (pendingConnection == null ||
-                pendingDomain == null) {
-            showMessage("Configuration session expired.");
-            return;
-        }
-
-        String subject =
-                certificate.getSubjectX500Principal().getName();
-
-        String issuer =
-                certificate.getIssuerX500Principal().getName();
+    private void confirmCertificate(X509Certificate ca) {
 
         new AlertDialog.Builder(requireActivity())
-                .setTitle("Confirm configuration")
+                .setTitle("Confirm trusted CA")
                 .setMessage(
-                        "Network: " + pendingConnection.getSsid() +
-                        "\n\nServer domain: " + pendingDomain +
-                        "\n\nCA subject:\n" + subject +
-                        "\n\nCA issuer:\n" + issuer +
-                        "\n\nOnly continue if these match " +
-                        "your institution's official settings.")
+                        "Domain: " + DOMAIN +
+                        "\n\nCertificate:\n" +
+                        ca.getSubjectX500Principal().getName() +
+                        "\n\nProceed only if this is the " +
+                        "verified CQUniversity CA.")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Configure", (d, which) ->
-                        addSuggestion(certificate))
+                .setPositiveButton("Configure", (d, w) -> {
+
+                    try {
+                        ca.checkValidity();
+
+                        WifiEnterpriseConfig config =
+                                makeConfig();
+
+                        config.setCaCertificate(ca);
+
+                        registerSuggestion(config);
+
+                    } catch (Exception e) {
+                        showMessage(
+                                "Certificate error: " +
+                                e.getMessage());
+                    }
+                })
                 .show();
     }
 
-    private void addSuggestion(
-            X509Certificate certificate) {
+    private void registerSuggestion(
+            WifiEnterpriseConfig config) {
 
-        if (wifiManager == null ||
-                pendingConnection == null ||
-                pendingDomain == null) {
-            showMessage("Configuration unavailable.");
+        if (Build.VERSION.SDK_INT < 29) {
+            showMessage("Android 10+ required.");
             return;
         }
 
         try {
-            validateCertificate(certificate);
-
-            WifiEnterpriseConfig config =
-                    new WifiEnterpriseConfig();
-
-            config.setIdentity(
-                    pendingConnection.getIdentity());
-
-            config.setPassword(
-                    pendingConnection.getPassword());
-
-            config.setEapMethod(
-                    WifiEnterpriseConfig.Eap.PEAP);
-
-            config.setPhase2Method(
-                    WifiEnterpriseConfig.Phase2.MSCHAPV2);
-
-            config.setDomainSuffixMatch(pendingDomain);
-            config.setCaCertificate(certificate);
-
             WifiNetworkSuggestion suggestion =
                     new WifiNetworkSuggestion.Builder()
-                            .setSsid(pendingConnection.getSsid())
+                            .setSsid(
+                                    pendingConnection.getSsid())
                             .setWpa2EnterpriseConfig(config)
                             .build();
 
-            int result = wifiManager.addNetworkSuggestions(
-                    Collections.singletonList(suggestion));
+            if (activeSuggestion != null) {
+                wifiManager.removeNetworkSuggestions(
+                        Collections.singletonList(
+                                activeSuggestion));
+                activeSuggestion = null;
+            }
+
+            int result =
+                    wifiManager.addNetworkSuggestions(
+                            Collections.singletonList(
+                                    suggestion));
+
+            showMessage("Suggestion result: " + result);
 
             if (result ==
                     WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
-                showMessage("Network suggestion registered.");
+
+                activeSuggestion = suggestion;
+
                 showMessage(
-                        "Approve network if Android prompts.");
+                        "Network suggestion accepted.");
+                showMessage(
+                        "Watch for Android approval prompt.");
+                showMessage(
+                        "Check Wi-Fi settings for connection.");
+
             } else {
                 showMessage(
-                        "Network suggestion failed: " + result);
+                        "Suggestion rejected: " + result);
             }
 
         } catch (Exception e) {
-            Log.e(TAG, "Configuration failed", e);
+
+            Log.e(TAG, "Suggestion error", e);
+
             showMessage(
-                    "Unable to configure enterprise Wi-Fi.");
+                    "Connection configuration error: " +
+                    e.getClass().getSimpleName() +
+                    ": " + e.getMessage());
         }
     }
 
     private void removeSuggestions() {
 
-        if (wifiManager == null ||
-                Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT < 29) {
             return;
         }
 
         try {
-            int result = wifiManager.removeNetworkSuggestions(
-                    Collections.emptyList());
+            int result;
+
+            if (activeSuggestion != null) {
+                result = wifiManager.removeNetworkSuggestions(
+                        Collections.singletonList(
+                                activeSuggestion));
+            } else {
+                result = wifiManager.removeNetworkSuggestions(
+                        Collections.emptyList());
+            }
+
+            showMessage("Remove result: " + result);
 
             if (result ==
                     WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
-                showMessage(
-                        "App network suggestions removed.");
-            } else {
-                showMessage(
-                        "Removal failed: " + result);
+                activeSuggestion = null;
             }
 
         } catch (Exception e) {
-            Log.e(TAG, "Removal failed", e);
-            showMessage("Unable to remove suggestions.");
+            showMessage("Removal error: " + e.getMessage());
         }
     }
 
@@ -572,11 +493,13 @@ public class EnterpriseFragment extends Fragment {
                         result.capabilities != null &&
                         result.capabilities.contains("EAP") &&
                         !networks.contains(result.SSID)) {
+
                     networks.add(result.SSID);
                 }
             }
 
             if (networks.size() == 1) {
+
                 EditText input =
                         rootView.findViewById(R.id.ssid_edit);
 
@@ -585,10 +508,8 @@ public class EnterpriseFragment extends Fragment {
                 }
             }
 
-        } catch (SecurityException e) {
-            showMessage("Wi-Fi scan permission denied.");
         } catch (Exception e) {
-            Log.e(TAG, "Scan failed", e);
+            Log.e(TAG, "Scan error", e);
         }
     }
 
@@ -596,7 +517,8 @@ public class EnterpriseFragment extends Fragment {
 
         if (rootView != null) {
 
-            TextView logs = rootView.findViewById(R.id.logs);
+            TextView logs =
+                    rootView.findViewById(R.id.logs);
 
             if (logs != null) {
                 logs.setText(
@@ -610,8 +532,8 @@ public class EnterpriseFragment extends Fragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+
         rootView = null;
         pendingConnection = null;
-        pendingDomain = null;
     }
 }
