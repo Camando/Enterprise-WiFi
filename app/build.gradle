@@ -1,16 +1,19 @@
+
 apply plugin: 'com.android.application'
 
 android {
     namespace "com.felkertech.ussenterprise"
     compileSdkVersion 34
+
     defaultConfig {
         applicationId "com.felkertech.ussenterprise"
         minSdkVersion 21
-        targetSdkVersion 34
-        versionCode 4
-        versionName "1.1.1"
+        targetSdkVersion 28
+        versionCode 5
+        versionName "1.1.2"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
     }
+
     buildTypes {
         release {
             minifyEnabled false
@@ -21,9 +24,11 @@ android {
 
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
+
     androidTestImplementation('com.android.support.test.espresso:espresso-core:2.2.2') {
         exclude group: 'com.android.support', module: 'support-annotations'
     }
+
     implementation 'com.android.support:appcompat-v7:28.0.0'
     implementation 'com.android.support:leanback-v17:28.0.0'
     implementation 'com.android.support:design:28.0.0'
