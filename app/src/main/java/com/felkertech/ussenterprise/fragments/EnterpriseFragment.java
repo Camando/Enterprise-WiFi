@@ -61,9 +61,7 @@ public class EnterpriseFragment extends Fragment {
             @Nullable Bundle state) {
 
         rootView = inflater.inflate(
-                R.layout.activity_main,
-                container,
-                false);
+                R.layout.activity_main, container, false);
 
         Context context =
                 requireActivity().getApplicationContext();
@@ -77,7 +75,7 @@ public class EnterpriseFragment extends Fragment {
                 .setOnClickListener(v -> connect());
 
         rootView.findViewById(R.id.button_disconnect)
-                .setOnClickListener(v -> disconnect());
+                .setOnClickListener(v -> inspectSavedNetwork());
 
         rootView.findViewById(R.id.button_connect_preset)
                 .setVisibility(View.GONE);
@@ -87,10 +85,10 @@ public class EnterpriseFragment extends Fragment {
 
         ssidField.setText(SSID);
 
-        log("Enterprise Wi-Fi Build #15 ready.");
-        log("Legacy Wi-Fi configuration test.");
-        log("This build saves without switching.");
-        log("Server domain: " + DOMAIN);
+        log("Enterprise Wi-Fi Build #16 ready.");
+        log("CONNECT saves the enterprise profile.");
+        log("DISCONNECT button now INSPECTS saved profile.");
+        log("No automatic network switching.");
 
         checkCertificate();
 
@@ -99,15 +97,12 @@ public class EnterpriseFragment extends Fragment {
 
     @Override
     public void onStart() {
-
         super.onStart();
-
         checkLocationPermission();
         reportCurrentWifi();
     }
 
     private boolean hasFineLocation() {
-
         return getActivity() != null &&
                 getActivity().checkSelfPermission(
                         Manifest.permission.ACCESS_FINE_LOCATION)
@@ -115,15 +110,10 @@ public class EnterpriseFragment extends Fragment {
     }
 
     private void checkLocationPermission() {
-
         if (hasFineLocation()) {
-
             log("Precise Location: GRANTED.");
-
         } else {
-
             log("Precise Location: NOT GRANTED.");
-
             requestPermissions(
                     new String[]{
                             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -140,44 +130,33 @@ public class EnterpriseFragment extends Fragment {
             @NonNull int[] grantResults) {
 
         super.onRequestPermissionsResult(
-                requestCode,
-                permissions,
-                grantResults);
+                requestCode, permissions, grantResults);
 
         if (requestCode == LOCATION_REQUEST) {
-
             log(hasFineLocation()
                     ? "Precise Location: GRANTED."
                     : "Precise Location: DENIED.");
-
             reportCurrentWifi();
         }
     }
 
     private void setupSpinners() {
 
-        Spinner eap =
-                rootView.findViewById(R.id.eap);
+        Spinner eap = rootView.findViewById(R.id.eap);
+        Spinner phase2 = rootView.findViewById(R.id.phase2);
 
-        Spinner phase2 =
-                rootView.findViewById(R.id.phase2);
-
-        eap.setAdapter(
-                new EapSpinnerAdapter(getActivity()));
-
+        eap.setAdapter(new EapSpinnerAdapter(getActivity()));
         phase2.setAdapter(
                 new Phase2SpinnerAdapter(getActivity()));
 
         eap.setOnItemSelectedListener(
                 new AdapterView.OnItemSelectedListener() {
-
             @Override
             public void onItemSelected(
                     AdapterView<?> parent,
                     View view,
                     int position,
                     long id) {
-
                 selectedEap = (int) id;
             }
 
@@ -189,14 +168,12 @@ public class EnterpriseFragment extends Fragment {
 
         phase2.setOnItemSelectedListener(
                 new AdapterView.OnItemSelectedListener() {
-
             @Override
             public void onItemSelected(
                     AdapterView<?> parent,
                     View view,
                     int position,
                     long id) {
-
                 selectedPhase2 = (int) id;
             }
 
@@ -207,21 +184,16 @@ public class EnterpriseFragment extends Fragment {
         });
     }
 
-    private String fingerprint(
-            X509Certificate certificate)
+    private String fingerprint(X509Certificate certificate)
             throws Exception {
 
-        byte[] hash =
-                MessageDigest.getInstance("SHA-256")
-                        .digest(certificate.getEncoded());
+        byte[] hash = MessageDigest.getInstance("SHA-256")
+                .digest(certificate.getEncoded());
 
-        StringBuilder result =
-                new StringBuilder();
+        StringBuilder result = new StringBuilder();
 
         for (byte b : hash) {
-
-            result.append(
-                    String.format("%02X", b & 0xff));
+            result.append(String.format("%02X", b & 0xff));
         }
 
         return result.toString();
@@ -230,14 +202,11 @@ public class EnterpriseFragment extends Fragment {
     private X509Certificate findCquCertificate() {
 
         try {
-
             KeyStore store =
                     KeyStore.getInstance("AndroidCAStore");
-
             store.load(null);
 
-            Enumeration<String> aliases =
-                    store.aliases();
+            Enumeration<String> aliases = store.aliases();
 
             while (aliases.hasMoreElements()) {
 
@@ -258,7 +227,6 @@ public class EnterpriseFragment extends Fragment {
                     certificate.checkValidity();
 
                     if (certificate.getBasicConstraints() < 0) {
-
                         throw new Exception(
                                 "Certificate is not a CA");
                     }
@@ -274,9 +242,7 @@ public class EnterpriseFragment extends Fragment {
             log("Required CA certificate not found.");
 
         } catch (Exception e) {
-
             Log.e(TAG, "Certificate lookup failed", e);
-
             log("CA error: " +
                     e.getClass().getSimpleName());
         }
@@ -285,13 +251,9 @@ public class EnterpriseFragment extends Fragment {
     }
 
     private void checkCertificate() {
-
         if (findCquCertificate() != null) {
-
             log("Certificate configuration ready.");
-
         } else {
-
             log("Connection requires valid CA.");
         }
     }
@@ -299,41 +261,180 @@ public class EnterpriseFragment extends Fragment {
     private void reportCurrentWifi() {
 
         try {
-
             if (wifiManager == null) {
-
                 log("Wi-Fi service unavailable.");
                 return;
             }
 
-            WifiInfo info =
-                    wifiManager.getConnectionInfo();
+            WifiInfo info = wifiManager.getConnectionInfo();
 
             if (info != null) {
-
-                log("Current Wi-Fi SSID: " +
-                        info.getSSID());
-
+                log("Current Wi-Fi SSID: " + info.getSSID());
                 log("Current Wi-Fi state: " +
                         info.getSupplicantState());
             }
 
         } catch (Exception e) {
-
             log("Wi-Fi status unavailable.");
         }
+    }
+
+    private void inspectSavedNetwork() {
+
+        log("========== SAVED PROFILE CHECK ==========");
+
+        if (wifiManager == null) {
+            log("Wi-Fi service unavailable.");
+            return;
+        }
+
+        try {
+            List<WifiConfiguration> saved =
+                    wifiManager.getConfiguredNetworks();
+
+            if (saved == null) {
+                log("Android did not expose saved networks.");
+                log("This may be an API permission restriction.");
+                return;
+            }
+
+            log("Visible saved networks: " + saved.size());
+
+            boolean found = false;
+
+            for (WifiConfiguration config : saved) {
+
+                if (!("\"" + SSID + "\"").equals(config.SSID)) {
+                    continue;
+                }
+
+                found = true;
+
+                log("Saved SSID: " + SSID);
+                log("Network ID: " + config.networkId);
+                log("Status: " + config.status);
+
+                boolean wpaEap =
+                        config.allowedKeyManagement.get(
+                                WifiConfiguration.KeyMgmt.WPA_EAP);
+
+                boolean ieee8021x =
+                        config.allowedKeyManagement.get(
+                                WifiConfiguration.KeyMgmt.IEEE8021X);
+
+                log("WPA_EAP: " + wpaEap);
+                log("IEEE8021X: " + ieee8021x);
+
+                WifiEnterpriseConfig enterprise =
+                        config.enterpriseConfig;
+
+                if (enterprise == null) {
+                    log("ERROR: Enterprise config is NULL.");
+                    continue;
+                }
+
+                int eap = enterprise.getEapMethod();
+                int phase2 = enterprise.getPhase2Method();
+
+                log("EAP: " +
+                        (eap == WifiEnterpriseConfig.Eap.PEAP
+                                ? "PEAP (CORRECT)"
+                                : "Unexpected method: " + eap));
+
+                log("Phase 2: " +
+                        (phase2 ==
+                                WifiEnterpriseConfig.Phase2.MSCHAPV2
+                                ? "MSCHAPV2 (CORRECT)"
+                                : "Unexpected method: " + phase2));
+
+                String domain =
+                        enterprise.getDomainSuffixMatch();
+
+                log("Domain: " +
+                        (domain == null || domain.isEmpty()
+                                ? "MISSING"
+                                : domain));
+
+                log("Domain matches CQU: " +
+                        DOMAIN.equalsIgnoreCase(domain));
+
+                String identity = enterprise.getIdentity();
+
+                log("Identity present: " +
+                        (identity != null &&
+                                !identity.isEmpty()));
+
+                String anonymous =
+                        enterprise.getAnonymousIdentity();
+
+                log("Anonymous identity correct: " +
+                        "anonymous@cqu.edu.au".equalsIgnoreCase(
+                                anonymous));
+
+                X509Certificate ca =
+                        enterprise.getCaCertificate();
+
+                if (ca != null) {
+                    log("Saved CA: " +
+                            ca.getSubjectX500Principal().getName());
+
+                    log("Saved CA fingerprint correct: " +
+                            CA_FINGERPRINT.equals(
+                                    fingerprint(ca)));
+                } else {
+                    X509Certificate[] chain =
+                            enterprise.getCaCertificates();
+
+                    if (chain != null && chain.length > 0) {
+                        boolean matched = false;
+
+                        for (X509Certificate cert : chain) {
+                            if (CA_FINGERPRINT.equals(
+                                    fingerprint(cert))) {
+                                matched = true;
+                            }
+                        }
+
+                        log("Saved CA chain length: " +
+                                chain.length);
+                        log("Saved CA fingerprint correct: " +
+                                matched);
+                    } else {
+                        log("Saved CA: NOT EXPOSED.");
+                        log("Android may hide CA on readback.");
+                    }
+                }
+
+                log("Password: NOT DISPLAYED.");
+            }
+
+            if (!found) {
+                log("eduroam not visible to this app.");
+                log("Android may restrict saved-network access.");
+            }
+
+        } catch (SecurityException e) {
+            log("Saved profile inspection permission denied.");
+            Log.e(TAG, "Inspection permission denied", e);
+
+        } catch (Exception e) {
+            log("Saved profile inspection failed.");
+            log(e.getClass().getSimpleName());
+            Log.e(TAG, "Inspection failed", e);
+        }
+
+        reportCurrentWifi();
+        log("========== CHECK COMPLETE ==========");
     }
 
     private void connect() {
 
         if (wifiManager == null) {
-
             log("Wi-Fi service unavailable.");
             return;
         }
 
         if (!hasFineLocation()) {
-
             checkLocationPermission();
             return;
         }
@@ -359,7 +460,6 @@ public class EnterpriseFragment extends Fragment {
         if (ssid.isEmpty() ||
                 identity.isEmpty() ||
                 password.isEmpty()) {
-
             log("Enter SSID, identity and password.");
             return;
         }
@@ -367,7 +467,6 @@ public class EnterpriseFragment extends Fragment {
         if (selectedEap != WifiEnterpriseConfig.Eap.PEAP ||
                 selectedPhase2 !=
                         WifiEnterpriseConfig.Phase2.MSCHAPV2) {
-
             log("Select PEAP and MSCHAPV2.");
             return;
         }
@@ -375,31 +474,25 @@ public class EnterpriseFragment extends Fragment {
         X509Certificate ca = findCquCertificate();
 
         if (ca == null) {
-
             log("Cannot save: CA unavailable.");
             return;
         }
 
         try {
-
             WifiEnterpriseConfig enterprise =
                     new WifiEnterpriseConfig();
 
             enterprise.setIdentity(identity);
-
             enterprise.setAnonymousIdentity(
                     "anonymous@cqu.edu.au");
-
             enterprise.setPassword(password);
 
             enterprise.setEapMethod(
                     WifiEnterpriseConfig.Eap.PEAP);
-
             enterprise.setPhase2Method(
                     WifiEnterpriseConfig.Phase2.MSCHAPV2);
 
             enterprise.setCaCertificate(ca);
-
             enterprise.setDomainSuffixMatch(DOMAIN);
 
             WifiConfiguration config =
@@ -422,71 +515,42 @@ public class EnterpriseFragment extends Fragment {
             log("CA certificate: VERIFIED");
             log("Domain: " + DOMAIN);
 
-            int networkId =
-                    wifiManager.addNetwork(config);
+            int networkId = wifiManager.addNetwork(config);
 
             if (networkId >= 0) {
-
                 log("LEGACY NETWORK ADD SUCCEEDED.");
                 log("Network ID: " + networkId);
                 log("Android accepted the configuration.");
                 log("This does not verify authentication.");
                 log("No network switch requested.");
-
+                inspectSavedNetwork();
             } else {
-
                 log("LEGACY NETWORK ADD FAILED.");
                 log("WifiManager.addNetwork returned -1.");
-                log("Android may restrict legacy APIs.");
                 log("No network switch requested.");
             }
 
             reportCurrentWifi();
 
         } catch (SecurityException e) {
-
             log("LEGACY API PERMISSION DENIED.");
-
-            if (e.getMessage() != null) {
-
-                log(e.getMessage());
-            }
-
             Log.e(TAG, "Legacy Wi-Fi permission error", e);
 
         } catch (Exception e) {
-
             log("Legacy Wi-Fi configuration failed.");
             log(e.getClass().getSimpleName());
-
-            if (e.getMessage() != null) {
-
-                log(e.getMessage());
-            }
-
             Log.e(TAG, "Legacy Wi-Fi error", e);
         }
     }
 
-    private void disconnect() {
-
-        log("Build #15 does not disconnect Wi-Fi.");
-        log("S26 and saved networks are unchanged.");
-
-        reportCurrentWifi();
-    }
-
     public void loadSsids() {
 
-        if (rootView == null ||
-                wifiManager == null) {
+        if (rootView == null || wifiManager == null) {
             return;
         }
 
         try {
-
             if (!hasFineLocation()) {
-
                 checkLocationPermission();
                 return;
             }
@@ -498,34 +562,27 @@ public class EnterpriseFragment extends Fragment {
                 return;
             }
 
-            List<String> networks =
-                    new ArrayList<>();
+            List<String> networks = new ArrayList<>();
 
             for (ScanResult result : results) {
-
                 if (result.SSID != null &&
                         result.capabilities != null &&
                         result.capabilities.contains("EAP") &&
                         !networks.contains(result.SSID)) {
-
                     networks.add(result.SSID);
                 }
             }
 
             if (networks.size() == 1) {
-
                 EditText field =
-                        rootView.findViewById(
-                                R.id.ssid_edit);
+                        rootView.findViewById(R.id.ssid_edit);
 
                 if (field != null) {
-
                     field.setText(networks.get(0));
                 }
             }
 
         } catch (Exception e) {
-
             Log.e(TAG, "Scan failed", e);
         }
     }
@@ -538,11 +595,9 @@ public class EnterpriseFragment extends Fragment {
             return;
         }
 
-        TextView logs =
-                rootView.findViewById(R.id.logs);
+        TextView logs = rootView.findViewById(R.id.logs);
 
         if (logs != null) {
-
             logs.setText(
                     message + "\n\n" + logs.getText());
         }
@@ -550,9 +605,7 @@ public class EnterpriseFragment extends Fragment {
 
     @Override
     public void onDestroyView() {
-
         rootView = null;
-
         super.onDestroyView();
     }
 }
