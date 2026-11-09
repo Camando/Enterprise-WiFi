@@ -1,10 +1,12 @@
 
 package com.felkertech.ussenterprise.fragments;
 
+import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.net.NetworkInfo;
 import android.net.wifi.ScanResult;
 import android.net.wifi.SupplicantState;
@@ -16,6 +18,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
 import android.util.Log;
@@ -45,6 +48,7 @@ public class EnterpriseFragment extends Fragment {
     private static final String TAG = "EnterpriseWifi";
     private static final String SSID = "eduroam";
     private static final String DOMAIN = "cqu.edu.au";
+    private static final int LOCATION_REQUEST = 1201;
 
     private static final String CA_FINGERPRINT =
             "8FE4FB0AF93A4D0D67DB0BEBB23E37C7" +
@@ -106,9 +110,11 @@ public class EnterpriseFragment extends Fragment {
                                 WifiManager.EXTRA_NEW_STATE);
 
                 if (state != null && monitoring) {
+
                     String value = state.toString();
 
                     if (!value.equals(lastStatus)) {
+
                         log("Supplicant: " + value);
                         lastStatus = value;
                     }
@@ -156,6 +162,7 @@ public class EnterpriseFragment extends Fragment {
             if (connected) {
 
                 monitoring = false;
+
                 log("EDUROAM CONNECTION CONFIRMED.");
                 return;
             }
@@ -167,11 +174,12 @@ public class EnterpriseFragment extends Fragment {
                 log("Monitoring finished.");
 
                 if (authenticationFailureSeen) {
-                    log("Authentication error was detected.");
+
+                    log("Authentication error detected.");
+
                 } else {
+
                     log("No eduroam connection confirmed.");
-                    log("This does not necessarily mean");
-                    log("the credentials were rejected.");
                     log("Android may not have selected");
                     log("the suggested network.");
                 }
@@ -223,7 +231,7 @@ public class EnterpriseFragment extends Fragment {
 
         ssidField.setText(SSID);
 
-        log("Enterprise Wi-Fi Build #11 ready.");
+        log("Enterprise Wi-Fi Build #12 ready.");
         log("CQUniversity eduroam diagnostics.");
         log("Server domain: " + DOMAIN);
 
@@ -239,7 +247,7 @@ public class EnterpriseFragment extends Fragment {
 
         registerWifiReceiver();
 
-        log("Wi-Fi diagnostics enabled.");
+        checkLocationPermission();
 
         reportConnection();
     }
@@ -252,6 +260,66 @@ public class EnterpriseFragment extends Fragment {
         unregisterWifiReceiver();
 
         super.onStop();
+    }
+
+    private boolean hasFineLocation() {
+
+        if (getActivity() == null) {
+            return false;
+        }
+
+        return getActivity().checkSelfPermission(
+                Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void checkLocationPermission() {
+
+        if (hasFineLocation()) {
+
+            log("Precise Location: GRANTED.");
+            reportConnection();
+
+        } else {
+
+            log("Precise Location: NOT GRANTED.");
+            log("Requesting permission.");
+
+            requestPermissions(
+                    new String[]{
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                    },
+                    LOCATION_REQUEST);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode,
+            @NonNull String[] permissions,
+            @NonNull int[] grantResults) {
+
+        super.onRequestPermissionsResult(
+                requestCode,
+                permissions,
+                grantResults);
+
+        if (requestCode == LOCATION_REQUEST) {
+
+            if (hasFineLocation()) {
+
+                log("Precise Location: GRANTED.");
+                log("SSID detection should now work.");
+
+            } else {
+
+                log("Precise Location: DENIED.");
+                log("Android may hide the Wi-Fi SSID.");
+            }
+
+            reportConnection();
+        }
     }
 
     private void registerWifiReceiver() {
@@ -281,7 +349,7 @@ public class EnterpriseFragment extends Fragment {
 
         } catch (Exception e) {
 
-            log("Receiver registration failed: " +
+            log("Receiver error: " +
                     e.getClass().getSimpleName());
         }
     }
@@ -299,8 +367,7 @@ public class EnterpriseFragment extends Fragment {
 
         } catch (Exception e) {
 
-            Log.w(TAG,
-                    "Receiver removal failed", e);
+            Log.w(TAG, "Receiver removal failed", e);
 
         } finally {
 
@@ -473,7 +540,6 @@ public class EnterpriseFragment extends Fragment {
     private boolean reportConnection() {
 
         if (wifiManager == null) {
-            log("Wi-Fi manager unavailable.");
             return false;
         }
 
@@ -488,8 +554,7 @@ public class EnterpriseFragment extends Fragment {
                 return false;
             }
 
-            String currentSsid =
-                    info.getSSID();
+            String currentSsid = info.getSSID();
 
             if (currentSsid == null) {
                 currentSsid = "Unknown";
@@ -502,8 +567,23 @@ public class EnterpriseFragment extends Fragment {
                     info.getSupplicantState();
 
             log("Current SSID: " + currentSsid);
-
             log("Wi-Fi state: " + state);
+
+            if ("<unknown ssid>".equalsIgnoreCase(
+                    currentSsid)) {
+
+                if (!hasFineLocation()) {
+
+                    log("SSID hidden: fine location");
+                    log("permission not granted.");
+
+                } else {
+
+                    log("SSID hidden despite permission.");
+                    log("Check Android Wi-Fi privacy");
+                    log("or location restrictions.");
+                }
+            }
 
             if (SSID.equalsIgnoreCase(
                     currentSsid) &&
@@ -548,7 +628,6 @@ public class EnterpriseFragment extends Fragment {
         authenticationFailureSeen = false;
 
         log("Starting 60-second monitoring.");
-        log("Watching Wi-Fi state and errors.");
 
         handler.postDelayed(
                 monitorTask, 5000);
@@ -573,6 +652,13 @@ public class EnterpriseFragment extends Fragment {
                 rootView == null) {
 
             log("Wi-Fi service unavailable.");
+            return;
+        }
+
+        if (!hasFineLocation()) {
+
+            log("Precise Location not granted.");
+            checkLocationPermission();
             return;
         }
 
@@ -674,19 +760,12 @@ public class EnterpriseFragment extends Fragment {
                 log("Android accepted configuration.");
                 log("This is NOT a connection yet.");
 
-                log("Approve network suggestion");
-                log("if Android asks.");
-
                 startMonitoring();
 
             } else {
 
                 log("Suggestion registration failed.");
                 log("Android error code: " + result);
-
-                log("If already registered, the");
-                log("existing suggestion may still");
-                log("be active in Android.");
             }
 
         } catch (Exception e) {
@@ -696,11 +775,8 @@ public class EnterpriseFragment extends Fragment {
                     e);
 
             log("Connection configuration failed.");
-
             log(e.getClass().getSimpleName());
-
-            log(String.valueOf(
-                    e.getMessage()));
+            log(String.valueOf(e.getMessage()));
         }
     }
 
@@ -742,17 +818,9 @@ public class EnterpriseFragment extends Fragment {
 
         try {
 
-            MainActivity activity =
-                    (MainActivity) getActivity();
+            if (!hasFineLocation()) {
 
-            if (activity == null) {
-                return;
-            }
-
-            if (!activity
-                    .grantedLocationPermission()) {
-
-                activity.requestLocationPermission();
+                checkLocationPermission();
                 return;
             }
 
