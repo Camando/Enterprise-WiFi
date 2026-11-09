@@ -2,18 +2,17 @@
 package com.felkertech.ussenterprise.fragments;
 
 import android.Manifest;
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.PackageManager;
-import android.net.NetworkInfo;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.wifi.ScanResult;
-import android.net.wifi.SupplicantState;
 import android.net.wifi.WifiEnterpriseConfig;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
-import android.net.wifi.WifiNetworkSuggestion;
+import android.net.wifi.WifiNetworkSpecifier;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -31,7 +30,6 @@ import android.widget.Spinner;
 import android.widget.TextView;
 
 import com.felkertech.ussenterprise.R;
-import com.felkertech.ussenterprise.activities.MainActivity;
 import com.felkertech.ussenterprise.ui.EapSpinnerAdapter;
 import com.felkertech.ussenterprise.ui.Phase2SpinnerAdapter;
 
@@ -39,15 +37,14 @@ import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 
 public class EnterpriseFragment extends Fragment {
 
     private static final String TAG = "EnterpriseWifi";
-    private static final String SSID = "eduroam";
     private static final String DOMAIN = "cqu.edu.au";
+    private static final String SSID = "eduroam";
     private static final int LOCATION_REQUEST = 1201;
 
     private static final String CA_FINGERPRINT =
@@ -56,140 +53,17 @@ public class EnterpriseFragment extends Fragment {
 
     private View rootView;
     private WifiManager wifiManager;
+    private ConnectivityManager connectivityManager;
+    private ConnectivityManager.NetworkCallback networkCallback;
 
     private final Handler handler =
             new Handler(Looper.getMainLooper());
 
-    private boolean receiverRegistered = false;
-    private boolean monitoring = false;
-    private int monitorCount = 0;
-    private String lastStatus = "";
-    private boolean authenticationFailureSeen = false;
-
-    private int selectedEap =
-            WifiEnterpriseConfig.Eap.PEAP;
-
+    private int selectedEap = WifiEnterpriseConfig.Eap.PEAP;
     private int selectedPhase2 =
             WifiEnterpriseConfig.Phase2.MSCHAPV2;
 
-    private final BroadcastReceiver wifiReceiver =
-            new BroadcastReceiver() {
-
-        @Override
-        public void onReceive(
-                Context context, Intent intent) {
-
-            if (intent == null) {
-                return;
-            }
-
-            String action = intent.getAction();
-
-            if (WifiManager
-                    .SUPPLICANT_STATE_CHANGED_ACTION
-                    .equals(action)) {
-
-                int error = intent.getIntExtra(
-                        WifiManager.EXTRA_SUPPLICANT_ERROR,
-                        -1);
-
-                if (error ==
-                        WifiManager.ERROR_AUTHENTICATING) {
-
-                    authenticationFailureSeen = true;
-
-                    log("AUTHENTICATION ERROR reported.");
-                    log("Check credentials, EAP settings");
-                    log("and certificate validation.");
-
-                    return;
-                }
-
-                SupplicantState state =
-                        intent.getParcelableExtra(
-                                WifiManager.EXTRA_NEW_STATE);
-
-                if (state != null && monitoring) {
-
-                    String value = state.toString();
-
-                    if (!value.equals(lastStatus)) {
-
-                        log("Supplicant: " + value);
-                        lastStatus = value;
-                    }
-                }
-            }
-
-            if (WifiManager
-                    .NETWORK_STATE_CHANGED_ACTION
-                    .equals(action)) {
-
-                NetworkInfo info =
-                        intent.getParcelableExtra(
-                                WifiManager.EXTRA_NETWORK_INFO);
-
-                if (info != null) {
-
-                    log("Network state: " +
-                            info.getDetailedState());
-
-                    if (info.isConnected()) {
-                        reportConnection();
-                    }
-                }
-            }
-        }
-    };
-
-    private final Runnable monitorTask =
-            new Runnable() {
-
-        @Override
-        public void run() {
-
-            if (!monitoring || rootView == null) {
-                return;
-            }
-
-            monitorCount++;
-
-            log("Connection check " +
-                    monitorCount + "/12");
-
-            boolean connected = reportConnection();
-
-            if (connected) {
-
-                monitoring = false;
-
-                log("EDUROAM CONNECTION CONFIRMED.");
-                return;
-            }
-
-            if (monitorCount >= 12) {
-
-                monitoring = false;
-
-                log("Monitoring finished.");
-
-                if (authenticationFailureSeen) {
-
-                    log("Authentication error detected.");
-
-                } else {
-
-                    log("No eduroam connection confirmed.");
-                    log("Android may not have selected");
-                    log("the suggested network.");
-                }
-
-                return;
-            }
-
-            handler.postDelayed(this, 5000);
-        }
-    };
+    private boolean requestActive = false;
 
     @Nullable
     @Override
@@ -203,36 +77,36 @@ public class EnterpriseFragment extends Fragment {
                 container,
                 false);
 
+        Context appContext =
+                requireActivity().getApplicationContext();
+
         wifiManager = (WifiManager)
-                requireActivity()
-                        .getApplicationContext()
-                        .getSystemService(
-                                Context.WIFI_SERVICE);
+                appContext.getSystemService(
+                        Context.WIFI_SERVICE);
+
+        connectivityManager = (ConnectivityManager)
+                appContext.getSystemService(
+                        Context.CONNECTIVITY_SERVICE);
 
         setupSpinners();
 
-        rootView.findViewById(
-                R.id.button_connect)
-                .setOnClickListener(
-                        v -> connect());
+        rootView.findViewById(R.id.button_connect)
+                .setOnClickListener(v -> connect());
 
-        rootView.findViewById(
-                R.id.button_disconnect)
-                .setOnClickListener(
-                        v -> disconnect());
+        rootView.findViewById(R.id.button_disconnect)
+                .setOnClickListener(v -> disconnect());
 
         rootView.findViewById(
                 R.id.button_connect_preset)
                 .setVisibility(View.GONE);
 
         EditText ssidField =
-                rootView.findViewById(
-                        R.id.ssid_edit);
+                rootView.findViewById(R.id.ssid_edit);
 
         ssidField.setText(SSID);
 
-        log("Enterprise Wi-Fi Build #12 ready.");
-        log("CQUniversity eduroam diagnostics.");
+        log("Enterprise Wi-Fi Build #13 ready.");
+        log("Direct eduroam connection test.");
         log("Server domain: " + DOMAIN);
 
         checkCertificate();
@@ -245,31 +119,15 @@ public class EnterpriseFragment extends Fragment {
 
         super.onStart();
 
-        registerWifiReceiver();
-
         checkLocationPermission();
-
-        reportConnection();
-    }
-
-    @Override
-    public void onStop() {
-
-        stopMonitoring();
-
-        unregisterWifiReceiver();
-
-        super.onStop();
+        reportCurrentWifi();
     }
 
     private boolean hasFineLocation() {
 
-        if (getActivity() == null) {
-            return false;
-        }
-
-        return getActivity().checkSelfPermission(
-                Manifest.permission.ACCESS_FINE_LOCATION)
+        return getActivity() != null &&
+                getActivity().checkSelfPermission(
+                        Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED;
     }
 
@@ -278,12 +136,10 @@ public class EnterpriseFragment extends Fragment {
         if (hasFineLocation()) {
 
             log("Precise Location: GRANTED.");
-            reportConnection();
 
         } else {
 
             log("Precise Location: NOT GRANTED.");
-            log("Requesting permission.");
 
             requestPermissions(
                     new String[]{
@@ -307,71 +163,11 @@ public class EnterpriseFragment extends Fragment {
 
         if (requestCode == LOCATION_REQUEST) {
 
-            if (hasFineLocation()) {
+            log(hasFineLocation()
+                    ? "Precise Location: GRANTED."
+                    : "Precise Location: DENIED.");
 
-                log("Precise Location: GRANTED.");
-                log("SSID detection should now work.");
-
-            } else {
-
-                log("Precise Location: DENIED.");
-                log("Android may hide the Wi-Fi SSID.");
-            }
-
-            reportConnection();
-        }
-    }
-
-    private void registerWifiReceiver() {
-
-        if (receiverRegistered) {
-            return;
-        }
-
-        try {
-
-            IntentFilter filter =
-                    new IntentFilter();
-
-            filter.addAction(
-                    WifiManager
-                            .NETWORK_STATE_CHANGED_ACTION);
-
-            filter.addAction(
-                    WifiManager
-                            .SUPPLICANT_STATE_CHANGED_ACTION);
-
-            requireActivity()
-                    .registerReceiver(
-                            wifiReceiver, filter);
-
-            receiverRegistered = true;
-
-        } catch (Exception e) {
-
-            log("Receiver error: " +
-                    e.getClass().getSimpleName());
-        }
-    }
-
-    private void unregisterWifiReceiver() {
-
-        if (!receiverRegistered) {
-            return;
-        }
-
-        try {
-
-            requireActivity()
-                    .unregisterReceiver(wifiReceiver);
-
-        } catch (Exception e) {
-
-            Log.w(TAG, "Receiver removal failed", e);
-
-        } finally {
-
-            receiverRegistered = false;
+            reportCurrentWifi();
         }
     }
 
@@ -432,12 +228,9 @@ public class EnterpriseFragment extends Fragment {
             X509Certificate certificate)
             throws Exception {
 
-        MessageDigest digest =
-                MessageDigest.getInstance("SHA-256");
-
         byte[] hash =
-                digest.digest(
-                        certificate.getEncoded());
+                MessageDigest.getInstance("SHA-256")
+                        .digest(certificate.getEncoded());
 
         StringBuilder result =
                 new StringBuilder();
@@ -445,8 +238,7 @@ public class EnterpriseFragment extends Fragment {
         for (byte b : hash) {
 
             result.append(
-                    String.format(
-                            "%02X", b & 0xff));
+                    String.format("%02X", b & 0xff));
         }
 
         return result.toString();
@@ -457,41 +249,32 @@ public class EnterpriseFragment extends Fragment {
         try {
 
             KeyStore store =
-                    KeyStore.getInstance(
-                            "AndroidCAStore");
+                    KeyStore.getInstance("AndroidCAStore");
 
             store.load(null);
 
             Enumeration<String> aliases =
                     store.aliases();
 
-            int count = 0;
-
             while (aliases.hasMoreElements()) {
 
-                String alias =
-                        aliases.nextElement();
-
                 java.security.cert.Certificate item =
-                        store.getCertificate(alias);
+                        store.getCertificate(
+                                aliases.nextElement());
 
-                if (!(item instanceof
-                        X509Certificate)) {
+                if (!(item instanceof X509Certificate)) {
                     continue;
                 }
 
                 X509Certificate certificate =
                         (X509Certificate) item;
 
-                count++;
-
                 if (CA_FINGERPRINT.equals(
                         fingerprint(certificate))) {
 
                     certificate.checkValidity();
 
-                    if (certificate
-                            .getBasicConstraints() < 0) {
+                    if (certificate.getBasicConstraints() < 0) {
 
                         throw new Exception(
                                 "Certificate is not a CA");
@@ -505,17 +288,13 @@ public class EnterpriseFragment extends Fragment {
                 }
             }
 
-            log("Checked " + count +
-                    " Android certificates.");
-
-            log("Required CQUniversity CA not found.");
+            log("Required CA certificate not found.");
 
         } catch (Exception e) {
 
-            Log.e(TAG,
-                    "Certificate lookup failed", e);
+            Log.e(TAG, "Certificate lookup failed", e);
 
-            log("CA lookup error: " +
+            log("CA error: " +
                     e.getClass().getSimpleName());
         }
 
@@ -524,120 +303,35 @@ public class EnterpriseFragment extends Fragment {
 
     private void checkCertificate() {
 
-        X509Certificate ca =
-                findCquCertificate();
+        if (findCquCertificate() != null) {
 
-        if (ca == null) {
-
-            log("Connection requires CA installation.");
+            log("Certificate configuration ready.");
 
         } else {
 
-            log("Certificate configuration ready.");
+            log("Connection requires valid CA.");
         }
     }
 
-    private boolean reportConnection() {
-
-        if (wifiManager == null) {
-            return false;
-        }
+    private void reportCurrentWifi() {
 
         try {
 
-            WifiInfo info =
-                    wifiManager.getConnectionInfo();
+            WifiInfo info = wifiManager.getConnectionInfo();
 
-            if (info == null) {
+            if (info != null) {
 
-                log("No Wi-Fi connection information.");
-                return false;
+                log("Default Wi-Fi SSID: " +
+                        info.getSSID());
+
+                log("Default Wi-Fi state: " +
+                        info.getSupplicantState());
             }
-
-            String currentSsid = info.getSSID();
-
-            if (currentSsid == null) {
-                currentSsid = "Unknown";
-            }
-
-            currentSsid =
-                    currentSsid.replace("\"", "");
-
-            SupplicantState state =
-                    info.getSupplicantState();
-
-            log("Current SSID: " + currentSsid);
-            log("Wi-Fi state: " + state);
-
-            if ("<unknown ssid>".equalsIgnoreCase(
-                    currentSsid)) {
-
-                if (!hasFineLocation()) {
-
-                    log("SSID hidden: fine location");
-                    log("permission not granted.");
-
-                } else {
-
-                    log("SSID hidden despite permission.");
-                    log("Check Android Wi-Fi privacy");
-                    log("or location restrictions.");
-                }
-            }
-
-            if (SSID.equalsIgnoreCase(
-                    currentSsid) &&
-                    state ==
-                    SupplicantState.COMPLETED) {
-
-                log("Connected to eduroam.");
-                log("Signal: " +
-                        info.getRssi() + " dBm");
-
-                return true;
-            }
-
-            if ("S26".equalsIgnoreCase(
-                    currentSsid)) {
-
-                log("Still connected to S26.");
-                log("Android has not switched");
-                log("to eduroam.");
-            }
-
-        } catch (SecurityException e) {
-
-            log("Wi-Fi status permission denied.");
 
         } catch (Exception e) {
 
-            log("Status error: " +
-                    e.getClass().getSimpleName());
+            log("Wi-Fi status unavailable.");
         }
-
-        return false;
-    }
-
-    private void startMonitoring() {
-
-        stopMonitoring();
-
-        monitoring = true;
-        monitorCount = 0;
-        lastStatus = "";
-        authenticationFailureSeen = false;
-
-        log("Starting 60-second monitoring.");
-
-        handler.postDelayed(
-                monitorTask, 5000);
-    }
-
-    private void stopMonitoring() {
-
-        monitoring = false;
-
-        handler.removeCallbacks(monitorTask);
     }
 
     private void connect() {
@@ -648,43 +342,35 @@ public class EnterpriseFragment extends Fragment {
             return;
         }
 
-        if (wifiManager == null ||
-                rootView == null) {
-
-            log("Wi-Fi service unavailable.");
-            return;
-        }
-
         if (!hasFineLocation()) {
 
-            log("Precise Location not granted.");
             checkLocationPermission();
             return;
         }
 
+        if (connectivityManager == null) {
+
+            log("Connectivity service unavailable.");
+            return;
+        }
+
         EditText ssidField =
-                rootView.findViewById(
-                        R.id.ssid_edit);
+                rootView.findViewById(R.id.ssid_edit);
 
         EditText identityField =
-                rootView.findViewById(
-                        R.id.identity);
+                rootView.findViewById(R.id.identity);
 
         EditText passwordField =
-                rootView.findViewById(
-                        R.id.password);
+                rootView.findViewById(R.id.password);
 
         String ssid =
-                ssidField.getText()
-                        .toString().trim();
+                ssidField.getText().toString().trim();
 
         String identity =
-                identityField.getText()
-                        .toString().trim();
+                identityField.getText().toString().trim();
 
         String password =
-                passwordField.getText()
-                        .toString();
+                passwordField.getText().toString();
 
         if (ssid.isEmpty() ||
                 identity.isEmpty() ||
@@ -694,119 +380,184 @@ public class EnterpriseFragment extends Fragment {
             return;
         }
 
-        if (selectedEap !=
-                WifiEnterpriseConfig.Eap.PEAP ||
+        if (selectedEap != WifiEnterpriseConfig.Eap.PEAP ||
                 selectedPhase2 !=
-                WifiEnterpriseConfig.Phase2.MSCHAPV2) {
+                        WifiEnterpriseConfig.Phase2.MSCHAPV2) {
 
             log("Select PEAP and MSCHAPV2.");
             return;
         }
 
-        X509Certificate ca =
-                findCquCertificate();
+        X509Certificate ca = findCquCertificate();
 
         if (ca == null) {
 
-            log("Cannot configure: CA unavailable.");
+            log("Cannot connect: CA unavailable.");
+            return;
+        }
+
+        disconnectRequest();
+
+        try {
+
+            WifiEnterpriseConfig enterprise =
+                    new WifiEnterpriseConfig();
+
+            enterprise.setIdentity(identity);
+            enterprise.setAnonymousIdentity(
+                    "anonymous@cqu.edu.au");
+            enterprise.setPassword(password);
+
+            enterprise.setEapMethod(
+                    WifiEnterpriseConfig.Eap.PEAP);
+
+            enterprise.setPhase2Method(
+                    WifiEnterpriseConfig.Phase2.MSCHAPV2);
+
+            enterprise.setCaCertificate(ca);
+            enterprise.setDomainSuffixMatch(DOMAIN);
+
+            WifiNetworkSpecifier specifier =
+                    new WifiNetworkSpecifier.Builder()
+                            .setSsid(ssid)
+                            .setWpa2EnterpriseConfig(
+                                    enterprise)
+                            .build();
+
+            NetworkRequest request =
+                    new NetworkRequest.Builder()
+                            .addTransportType(
+                                    NetworkCapabilities.TRANSPORT_WIFI)
+                            .removeCapability(
+                                    NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                            .setNetworkSpecifier(specifier)
+                            .build();
+
+            networkCallback =
+                    new ConnectivityManager.NetworkCallback() {
+
+                @Override
+                public void onAvailable(Network network) {
+
+                    handler.post(() -> {
+
+                        log("DIRECT CONNECTION AVAILABLE.");
+                        log("Android supplied a Wi-Fi network.");
+                        log("Network handle: " +
+                                network.getNetworkHandle());
+
+                        log("This is an app-specific network.");
+                        log("It may not replace S26.");
+
+                        reportCurrentWifi();
+                    });
+                }
+
+                @Override
+                public void onCapabilitiesChanged(
+                        Network network,
+                        NetworkCapabilities capabilities) {
+
+                    handler.post(() -> {
+
+                        if (Build.VERSION.SDK_INT >= 29) {
+
+                            Object transport =
+                                    capabilities.getTransportInfo();
+
+                            if (transport instanceof WifiInfo) {
+
+                                WifiInfo info =
+                                        (WifiInfo) transport;
+
+                                log("Requested network SSID: " +
+                                        info.getSSID());
+
+                                log("Requested network RSSI: " +
+                                        info.getRssi() + " dBm");
+                            }
+                        }
+                    });
+                }
+
+                @Override
+                public void onUnavailable() {
+
+                    handler.post(() -> {
+
+                        requestActive = false;
+
+                        log("DIRECT CONNECTION UNAVAILABLE.");
+                        log("Android did not establish");
+                        log("the requested connection.");
+                        log("This alone does not prove");
+                        log("the password is incorrect.");
+                    });
+                }
+
+                @Override
+                public void onLost(Network network) {
+
+                    handler.post(() -> {
+
+                        log("Requested Wi-Fi network lost.");
+                    });
+                }
+            };
+
+            log("Requesting direct eduroam connection.");
+            log("PEAP/MSCHAPV2 configured.");
+            log("CA and domain validation enabled.");
+            log("Watch for an Android approval prompt.");
+
+            requestActive = true;
+
+            connectivityManager.requestNetwork(
+                    request,
+                    networkCallback,
+                    60000);
+
+        } catch (Exception e) {
+
+            log("Direct request failed: " +
+                    e.getClass().getSimpleName());
+
+            log(String.valueOf(e.getMessage()));
+
+            Log.e(TAG, "Direct connection error", e);
+
+            disconnectRequest();
+        }
+    }
+
+    private void disconnectRequest() {
+
+        if (networkCallback == null) {
             return;
         }
 
         try {
 
-            WifiEnterpriseConfig config =
-                    new WifiEnterpriseConfig();
-
-            config.setIdentity(identity);
-
-            config.setAnonymousIdentity(
-                    "anonymous@cqu.edu.au");
-
-            config.setPassword(password);
-
-            config.setEapMethod(
-                    WifiEnterpriseConfig.Eap.PEAP);
-
-            config.setPhase2Method(
-                    WifiEnterpriseConfig
-                            .Phase2.MSCHAPV2);
-
-            config.setCaCertificate(ca);
-
-            config.setDomainSuffixMatch(DOMAIN);
-
-            log("PEAP/MSCHAPV2 configured.");
-            log("CA certificate verified.");
-            log("Domain validation enabled.");
-
-            WifiNetworkSuggestion suggestion =
-                    new WifiNetworkSuggestion.Builder()
-                            .setSsid(ssid)
-                            .setWpa2EnterpriseConfig(
-                                    config)
-                            .build();
-
-            int result =
-                    wifiManager.addNetworkSuggestions(
-                            Collections.singletonList(
-                                    suggestion));
-
-            log("Suggestion result: " + result);
-
-            if (result ==
-                    WifiManager
-                            .STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
-
-                log("Android accepted configuration.");
-                log("This is NOT a connection yet.");
-
-                startMonitoring();
-
-            } else {
-
-                log("Suggestion registration failed.");
-                log("Android error code: " + result);
-            }
+            connectivityManager.unregisterNetworkCallback(
+                    networkCallback);
 
         } catch (Exception e) {
 
-            Log.e(TAG,
-                    "Connection configuration failed",
-                    e);
-
-            log("Connection configuration failed.");
-            log(e.getClass().getSimpleName());
-            log(String.valueOf(e.getMessage()));
+            Log.w(TAG, "Callback removal failed", e);
         }
+
+        networkCallback = null;
+        requestActive = false;
     }
 
     private void disconnect() {
 
-        stopMonitoring();
+        disconnectRequest();
 
-        if (Build.VERSION.SDK_INT < 29 ||
-                wifiManager == null) {
-            return;
-        }
+        log("Direct connection request released.");
+        log("This does not remove saved networks.");
 
-        try {
-
-            int result =
-                    wifiManager.removeNetworkSuggestions(
-                            Collections.emptyList());
-
-            log("Remove suggestions result: " +
-                    result);
-
-            log("This removes app suggestions,");
-            log("not necessarily the active");
-            log("Wi-Fi connection.");
-
-        } catch (Exception e) {
-
-            log("Removal failed: " +
-                    e.getClass().getSimpleName());
-        }
+        reportCurrentWifi();
     }
 
     public void loadSsids() {
@@ -838,10 +589,8 @@ public class EnterpriseFragment extends Fragment {
 
                 if (result.SSID != null &&
                         result.capabilities != null &&
-                        result.capabilities
-                                .contains("EAP") &&
-                        !networks.contains(
-                                result.SSID)) {
+                        result.capabilities.contains("EAP") &&
+                        !networks.contains(result.SSID)) {
 
                     networks.add(result.SSID);
                 }
@@ -855,8 +604,7 @@ public class EnterpriseFragment extends Fragment {
 
                 if (field != null) {
 
-                    field.setText(
-                            networks.get(0));
+                    field.setText(networks.get(0));
                 }
             }
 
@@ -875,21 +623,19 @@ public class EnterpriseFragment extends Fragment {
         }
 
         TextView logs =
-                rootView.findViewById(
-                        R.id.logs);
+                rootView.findViewById(R.id.logs);
 
         if (logs != null) {
 
             logs.setText(
-                    message + "\n\n" +
-                            logs.getText());
+                    message + "\n\n" + logs.getText());
         }
     }
 
     @Override
     public void onDestroyView() {
 
-        stopMonitoring();
+        disconnectRequest();
 
         rootView = null;
 
