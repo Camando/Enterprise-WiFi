@@ -44,6 +44,8 @@ public class EnterpriseFragment extends Fragment {
 
     private static final String TAG = "EnterpriseWifi";
     private static final int PICK_CA_FILE = 7101;
+    private static final String DEFAULT_SSID = "eduroam";
+    private static final String DEFAULT_DOMAIN = "cqu.edu.au";
 
     private View rootView;
     private WifiManager wifiManager;
@@ -82,11 +84,14 @@ public class EnterpriseFragment extends Fragment {
         rootView.findViewById(R.id.button_connect_preset)
                 .setVisibility(View.GONE);
 
-        EditText ssid = rootView.findViewById(R.id.ssid_edit);
-        ssid.setText("eduroam");
+        EditText ssid =
+                rootView.findViewById(R.id.ssid_edit);
 
-        showMessage("Enterprise Wi-Fi Build #7 ready.");
-        showMessage("CA file import available.");
+        ssid.setText(DEFAULT_SSID);
+
+        showMessage("Enterprise Wi-Fi Build #8 ready.");
+        showMessage("Default domain: " + DEFAULT_DOMAIN);
+        showMessage("CA certificate validation required.");
 
         return rootView;
     }
@@ -202,13 +207,15 @@ public class EnterpriseFragment extends Fragment {
                 InputType.TYPE_CLASS_TEXT |
                 InputType.TYPE_TEXT_VARIATION_URI);
 
-        input.setHint("Authentication server domain");
+        input.setText(DEFAULT_DOMAIN);
+        input.setSelection(input.length());
 
         new AlertDialog.Builder(requireActivity())
                 .setTitle("Server certificate domain")
                 .setMessage(
-                        "Enter the authentication server domain " +
-                        "provided by your institution.")
+                        "Confirm the authentication server domain. " +
+                        "For CQUniversity, the default is " +
+                        DEFAULT_DOMAIN + ".")
                 .setView(input)
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Next", (dialog, which) -> {
