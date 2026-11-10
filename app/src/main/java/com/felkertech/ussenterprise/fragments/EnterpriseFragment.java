@@ -28,7 +28,12 @@ import com.felkertech.ussenterprise.R;
 import com.felkertech.ussenterprise.ui.EapSpinnerAdapter;
 import com.felkertech.ussenterprise.ui.Phase2SpinnerAdapter;
 
+import java.security.KeyStore;
+import java.security.MessageDigest;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -38,8 +43,13 @@ public class EnterpriseFragment extends Fragment {
     private static final String TAG = "EnterpriseWifi";
     private static final String SSID = "eduroam";
     private static final String DOMAIN = "cqu.edu.au";
-    private static final String SYSTEM_CA_PATH =
-            "/system/etc/security/cacerts";
+    private static final String ANONYMOUS_IDENTITY =
+            "anonymous@cqu.edu.au";
+
+    private static final String CA_FINGERPRINT =
+            "8FE4FB0AF93A4D0D67DB0BEBB23E37C71" +
+            "BF325DCBCDD240EA04DAF58B47E1840";
+
     private static final int LOCATION_REQUEST = 1201;
 
     private View rootView;
@@ -91,9 +101,8 @@ public class EnterpriseFragment extends Fragment {
 
         ssidField.setText(SSID);
 
-        log("Enterprise Wi-Fi Build #19 ready.");
-        log("CA validation: SYSTEM CERTIFICATES.");
-        log("Server domain: " + DOMAIN);
+        log("Enterprise Wi-Fi Build #20 ready.");
+        log("CQU QuoVadis certificate validation.");
         log("CONNECT: save or update eduroam.");
         log("DISCONNECT: inspect saved profile.");
         log("No automatic network switching.");
@@ -297,6 +306,82 @@ public class EnterpriseFragment extends Fragment {
         return null;
     }
 
+    private String sha256Fingerprint(
+            X509Certificate certificate) throws Exception {
+
+        MessageDigest digest =
+                MessageDigest.getInstance("SHA-256");
+
+        byte[] hash = digest.digest(certificate.getEncoded());
+
+        StringBuilder result = new StringBuilder();
+
+        for (byte value : hash) {
+            result.append(
+                    String.format("%02X", value & 0xFF));
+        }
+
+        return result.toString();
+    }
+
+    private X509Certificate findCquCertificate() {
+
+        try {
+            KeyStore store =
+                    KeyStore.getInstance("AndroidCAStore");
+
+            store.load(null);
+
+            Enumeration<String> aliases =
+                    store.aliases();
+
+            int checked = 0;
+
+            while (aliases.hasMoreElements()) {
+
+                String alias = aliases.nextElement();
+
+                Certificate certificate =
+                        store.getCertificate(alias);
+
+                if (!(certificate instanceof X509Certificate)) {
+                    continue;
+                }
+
+                X509Certificate x509 =
+                        (X509Certificate) certificate;
+
+                checked++;
+
+                String fingerprint =
+                        sha256Fingerprint(x509);
+
+                if (CA_FINGERPRINT.equalsIgnoreCase(
+                        fingerprint)) {
+
+                    log("CQU CA certificate found.");
+                    log("CA subject: " +
+                            x509.getSubjectX500Principal().getName());
+                    log("CA fingerprint: MATCH.");
+                    log("Certificates checked: " + checked);
+
+                    return x509;
+                }
+            }
+
+            log("CQU CA certificate NOT FOUND.");
+            log("Certificates checked: " + checked);
+
+        } catch (Exception e) {
+            log("Certificate lookup failed: " +
+                    e.getClass().getSimpleName());
+
+            Log.e(TAG, "Certificate lookup error", e);
+        }
+
+        return null;
+    }
+
     private void inspectSavedNetwork() {
 
         if (busy) {
@@ -387,22 +472,14 @@ public class EnterpriseFragment extends Fragment {
                             !enterprise.getIdentity().isEmpty()));
 
             log("Anonymous identity correct: " +
-                    "anonymous@cqu.edu.au".equalsIgnoreCase(
+                    ANONYMOUS_IDENTITY.equalsIgnoreCase(
                             enterprise.getAnonymousIdentity()));
 
             boolean caPresent =
                     enterprise.getCaCertificate() != null;
 
-            log("Single CA certificate exposed: " + caPresent);
-
-            String caPath = enterprise.getCaPath();
-
-            log("CA path: " +
-                    (caPath == null || caPath.isEmpty()
-                            ? "NOT EXPOSED"
-                            : caPath));
-
-            log("CA readback may be restricted by Android.");
+            log("CA certificate exposed: " + caPresent);
+            log("CA readback may be redacted by Android.");
             log("Password: NOT DISPLAYED.");
             log("Readback does not prove authentication.");
 
@@ -474,7 +551,7 @@ public class EnterpriseFragment extends Fragment {
 
         busy = true;
 
-        log("Preparing Build #19 enterprise profile...");
+        log("Preparing Build #20 enterprise profile...");
         log("Wi-Fi operations running in background.");
 
         runBackground(() -> {
@@ -493,12 +570,21 @@ public class EnterpriseFragment extends Fragment {
             String password) {
 
         try {
+            X509Certificate ca =
+                    findCquCertificate();
+
+            if (ca == null) {
+                log("NETWORK SAVE ABORTED.");
+                log("Required CQU CA certificate unavailable.");
+                return;
+            }
+
             WifiEnterpriseConfig enterprise =
                     new WifiEnterpriseConfig();
 
             enterprise.setIdentity(identity);
             enterprise.setAnonymousIdentity(
-                    "anonymous@cqu.edu.au");
+                    ANONYMOUS_IDENTITY);
             enterprise.setPassword(password);
 
             enterprise.setEapMethod(
@@ -507,12 +593,7 @@ public class EnterpriseFragment extends Fragment {
             enterprise.setPhase2Method(
                     WifiEnterpriseConfig.Phase2.MSCHAPV2);
 
-            // Build #19 diagnostic change:
-            // Use Android's system CA directory.
-            // Restrict certificate matching to CQU's domain.
-            // Do not disable certificate validation.
-
-            enterprise.setCaPath(SYSTEM_CA_PATH);
+            enterprise.setCaCertificate(ca);
             enterprise.setDomainSuffixMatch(DOMAIN);
 
             WifiConfiguration config =
@@ -531,8 +612,8 @@ public class EnterpriseFragment extends Fragment {
             log("SSID: eduroam");
             log("EAP: PEAP");
             log("Phase 2: MSCHAPV2");
-            log("CA validation: SYSTEM CERTIFICATES");
-            log("CA path: " + SYSTEM_CA_PATH);
+            log("CA validation: QUOVADIS ROOT CA 2 G3");
+            log("CA fingerprint: VERIFIED");
             log("Server domain: " + DOMAIN);
             log("No credentials printed to log.");
 
