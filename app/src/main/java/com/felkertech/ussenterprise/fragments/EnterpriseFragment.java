@@ -38,6 +38,8 @@ public class EnterpriseFragment extends Fragment {
     private static final String TAG = "EnterpriseWifi";
     private static final String SSID = "eduroam";
     private static final String DOMAIN = "cqu.edu.au";
+    private static final String SYSTEM_CA_PATH =
+            "/system/etc/security/cacerts";
     private static final int LOCATION_REQUEST = 1201;
 
     private View rootView;
@@ -89,8 +91,9 @@ public class EnterpriseFragment extends Fragment {
 
         ssidField.setText(SSID);
 
-        log("Enterprise Wi-Fi Build #18 ready.");
-        log("TEST MODE: CA validation disabled.");
+        log("Enterprise Wi-Fi Build #19 ready.");
+        log("CA validation: SYSTEM CERTIFICATES.");
+        log("Server domain: " + DOMAIN);
         log("CONNECT: save or update eduroam.");
         log("DISCONNECT: inspect saved profile.");
         log("No automatic network switching.");
@@ -390,8 +393,16 @@ public class EnterpriseFragment extends Fragment {
             boolean caPresent =
                     enterprise.getCaCertificate() != null;
 
-            log("CA certificate exposed: " + caPresent);
-            log("CA readback may be redacted by Android.");
+            log("Single CA certificate exposed: " + caPresent);
+
+            String caPath = enterprise.getCaPath();
+
+            log("CA path: " +
+                    (caPath == null || caPath.isEmpty()
+                            ? "NOT EXPOSED"
+                            : caPath));
+
+            log("CA readback may be restricted by Android.");
             log("Password: NOT DISPLAYED.");
             log("Readback does not prove authentication.");
 
@@ -463,7 +474,7 @@ public class EnterpriseFragment extends Fragment {
 
         busy = true;
 
-        log("Preparing Build #18 enterprise profile...");
+        log("Preparing Build #19 enterprise profile...");
         log("Wi-Fi operations running in background.");
 
         runBackground(() -> {
@@ -496,13 +507,13 @@ public class EnterpriseFragment extends Fragment {
             enterprise.setPhase2Method(
                     WifiEnterpriseConfig.Phase2.MSCHAPV2);
 
-            // Build #18 diagnostic change:
-            // Do not assign a CA certificate.
-            // Do not configure server domain validation.
-            // This is an insecure test configuration.
+            // Build #19 diagnostic change:
+            // Use Android's system CA directory.
+            // Restrict certificate matching to CQU's domain.
+            // Do not disable certificate validation.
 
-            enterprise.setCaCertificate(null);
-            enterprise.setDomainSuffixMatch(null);
+            enterprise.setCaPath(SYSTEM_CA_PATH);
+            enterprise.setDomainSuffixMatch(DOMAIN);
 
             WifiConfiguration config =
                     new WifiConfiguration();
@@ -520,8 +531,9 @@ public class EnterpriseFragment extends Fragment {
             log("SSID: eduroam");
             log("EAP: PEAP");
             log("Phase 2: MSCHAPV2");
-            log("CA validation: DISABLED (TEST ONLY)");
-            log("Server domain validation: DISABLED");
+            log("CA validation: SYSTEM CERTIFICATES");
+            log("CA path: " + SYSTEM_CA_PATH);
+            log("Server domain: " + DOMAIN);
             log("No credentials printed to log.");
 
             List<WifiConfiguration> saved =
@@ -580,7 +592,7 @@ public class EnterpriseFragment extends Fragment {
             } else {
                 log("NETWORK SAVE FAILED.");
                 log("Both update/add paths unsuccessful.");
-                log("Android may reject unvalidated EAP.");
+                log("Android rejected the configuration.");
             }
 
             reportCurrentWifi();
