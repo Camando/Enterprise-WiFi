@@ -43,8 +43,9 @@ public class EnterpriseFragment extends Fragment {
     private static final String TAG = "EnterpriseWifi";
     private static final String SSID = "eduroam";
     private static final String DOMAIN = "cqu.edu.au";
-    private static final String ANONYMOUS_IDENTITY =
-            "anonymous@cqu.edu.au";
+
+    // Build #21: Leave anonymous identity blank.
+    private static final String ANONYMOUS_IDENTITY = "";
 
     private static final String CA_FINGERPRINT =
             "8FE4FB0AF93A4D0D67DB0BEBB23E37C71" +
@@ -101,7 +102,8 @@ public class EnterpriseFragment extends Fragment {
 
         ssidField.setText(SSID);
 
-        log("Enterprise Wi-Fi Build #20 ready.");
+        log("Enterprise Wi-Fi Build #21 ready.");
+        log("Anonymous identity: BLANK.");
         log("CQU QuoVadis certificate validation.");
         log("CONNECT: save or update eduroam.");
         log("DISCONNECT: inspect saved profile.");
@@ -471,9 +473,14 @@ public class EnterpriseFragment extends Fragment {
                     (enterprise.getIdentity() != null &&
                             !enterprise.getIdentity().isEmpty()));
 
-            log("Anonymous identity correct: " +
-                    ANONYMOUS_IDENTITY.equalsIgnoreCase(
-                            enterprise.getAnonymousIdentity()));
+            String anonymous =
+                    enterprise.getAnonymousIdentity();
+
+            boolean anonymousBlank =
+                    anonymous == null || anonymous.isEmpty();
+
+            log("Anonymous identity blank: " +
+                    anonymousBlank);
 
             boolean caPresent =
                     enterprise.getCaCertificate() != null;
@@ -551,7 +558,7 @@ public class EnterpriseFragment extends Fragment {
 
         busy = true;
 
-        log("Preparing Build #20 enterprise profile...");
+        log("Preparing Build #21 enterprise profile...");
         log("Wi-Fi operations running in background.");
 
         runBackground(() -> {
@@ -583,8 +590,12 @@ public class EnterpriseFragment extends Fragment {
                     new WifiEnterpriseConfig();
 
             enterprise.setIdentity(identity);
-            enterprise.setAnonymousIdentity(
-                    ANONYMOUS_IDENTITY);
+
+            // Build #21:
+            // Match the working phone's blank
+            // anonymous identity setting.
+            enterprise.setAnonymousIdentity("");
+
             enterprise.setPassword(password);
 
             enterprise.setEapMethod(
@@ -612,6 +623,7 @@ public class EnterpriseFragment extends Fragment {
             log("SSID: eduroam");
             log("EAP: PEAP");
             log("Phase 2: MSCHAPV2");
+            log("Anonymous identity: BLANK");
             log("CA validation: QUOVADIS ROOT CA 2 G3");
             log("CA fingerprint: VERIFIED");
             log("Server domain: " + DOMAIN);
