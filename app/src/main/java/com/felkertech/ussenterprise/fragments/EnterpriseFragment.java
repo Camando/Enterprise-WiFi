@@ -43,15 +43,13 @@ public class EnterpriseFragment extends Fragment {
     private static final String TAG = "EnterpriseWifi";
     private static final String SSID = "eduroam";
     private static final String DOMAIN = "cqu.edu.au";
-
-    // Build #21: Leave anonymous identity blank.
-    private static final String ANONYMOUS_IDENTITY = "";
-
-    private static final String CA_FINGERPRINT =
-            "8FE4FB0AF93A4D0D67DB0BEBB23E37C71" +
-            "BF325DCBCDD240EA04DAF58B47E1840";
-
     private static final int LOCATION_REQUEST = 1201;
+
+    private static final String[] TRUSTED_CA_NAMES = {
+            "AAA Certificate Services",
+            "USERTrust RSA Certification Authority",
+            "Sectigo Public Server Authentication Root R46"
+    };
 
     private View rootView;
     private WifiManager wifiManager;
@@ -102,9 +100,11 @@ public class EnterpriseFragment extends Fragment {
 
         ssidField.setText(SSID);
 
-        log("Enterprise Wi-Fi Build #21 ready.");
+        log("Enterprise Wi-Fi Build #22 ready.");
+        log("CORRECTED: Sectigo / USERTrust trust chain.");
+        log("Server: radius.cqu.edu.au");
+        log("Server domain restriction: " + DOMAIN);
         log("Anonymous identity: BLANK.");
-        log("CQU QuoVadis certificate validation.");
         log("CONNECT: save or update eduroam.");
         log("DISCONNECT: inspect saved profile.");
         log("No automatic network switching.");
@@ -314,7 +314,8 @@ public class EnterpriseFragment extends Fragment {
         MessageDigest digest =
                 MessageDigest.getInstance("SHA-256");
 
-        byte[] hash = digest.digest(certificate.getEncoded());
+        byte[] hash =
+                digest.digest(certificate.getEncoded());
 
         StringBuilder result = new StringBuilder();
 
@@ -326,7 +327,10 @@ public class EnterpriseFragment extends Fragment {
         return result.toString();
     }
 
-    private X509Certificate findCquCertificate() {
+    private X509Certificate[] findTrustedCquAuthorities() {
+
+        List<X509Certificate> trusted =
+                new ArrayList<>();
 
         try {
             KeyStore store =
@@ -334,54 +338,74 @@ public class EnterpriseFragment extends Fragment {
 
             store.load(null);
 
-            Enumeration<String> aliases =
-                    store.aliases();
+            log("Searching Android's trusted CA store.");
 
-            int checked = 0;
+            for (String caName : TRUSTED_CA_NAMES) {
 
-            while (aliases.hasMoreElements()) {
+                Enumeration<String> aliases =
+                        store.aliases();
 
-                String alias = aliases.nextElement();
+                boolean found = false;
 
-                Certificate certificate =
-                        store.getCertificate(alias);
+                while (aliases.hasMoreElements()) {
 
-                if (!(certificate instanceof X509Certificate)) {
-                    continue;
+                    String alias = aliases.nextElement();
+
+                    Certificate certificate =
+                            store.getCertificate(alias);
+
+                    if (!(certificate instanceof X509Certificate)) {
+                        continue;
+                    }
+
+                    X509Certificate x509 =
+                            (X509Certificate) certificate;
+
+                    String subject =
+                            x509.getSubjectX500Principal().getName();
+
+                    if (!subject.contains("CN=" + caName)) {
+                        continue;
+                    }
+
+                    if (x509.getBasicConstraints() < 0) {
+                        continue;
+                    }
+
+                    try {
+                        x509.checkValidity();
+                    } catch (Exception invalid) {
+                        log("CA certificate expired or not yet valid: "
+                                + caName);
+                        continue;
+                    }
+
+                    trusted.add(x509);
+
+                    log("TRUSTED CA FOUND: " + caName);
+                    log("CA SHA-256: " +
+                            sha256Fingerprint(x509));
+
+                    found = true;
+                    break;
                 }
 
-                X509Certificate x509 =
-                        (X509Certificate) certificate;
-
-                checked++;
-
-                String fingerprint =
-                        sha256Fingerprint(x509);
-
-                if (CA_FINGERPRINT.equalsIgnoreCase(
-                        fingerprint)) {
-
-                    log("CQU CA certificate found.");
-                    log("CA subject: " +
-                            x509.getSubjectX500Principal().getName());
-                    log("CA fingerprint: MATCH.");
-                    log("Certificates checked: " + checked);
-
-                    return x509;
+                if (!found) {
+                    log("CA not installed: " + caName);
                 }
             }
 
-            log("CQU CA certificate NOT FOUND.");
-            log("Certificates checked: " + checked);
+            log("Matching trusted CAs: " +
+                    trusted.size());
 
         } catch (Exception e) {
             log("Certificate lookup failed: " +
                     e.getClass().getSimpleName());
 
-            Log.e(TAG, "Certificate lookup error", e);
+            Log.e(TAG, "CA lookup error", e);
         }
 
-        return null;
+        return trusted.toArray(new X509Certificate[0]);
     }
 
     private void inspectSavedNetwork() {
@@ -476,16 +500,16 @@ public class EnterpriseFragment extends Fragment {
             String anonymous =
                     enterprise.getAnonymousIdentity();
 
-            boolean anonymousBlank =
-                    anonymous == null || anonymous.isEmpty();
-
             log("Anonymous identity blank: " +
-                    anonymousBlank);
+                    (anonymous == null || anonymous.isEmpty()));
 
-            boolean caPresent =
-                    enterprise.getCaCertificate() != null;
+            X509Certificate[] caCertificates =
+                    enterprise.getCaCertificates();
 
-            log("CA certificate exposed: " + caPresent);
+            int count = caCertificates == null
+                    ? 0 : caCertificates.length;
+
+            log("CA certificates exposed: " + count);
             log("CA readback may be redacted by Android.");
             log("Password: NOT DISPLAYED.");
             log("Readback does not prove authentication.");
@@ -558,7 +582,7 @@ public class EnterpriseFragment extends Fragment {
 
         busy = true;
 
-        log("Preparing Build #21 enterprise profile...");
+        log("Preparing Build #22 enterprise profile...");
         log("Wi-Fi operations running in background.");
 
         runBackground(() -> {
@@ -577,12 +601,13 @@ public class EnterpriseFragment extends Fragment {
             String password) {
 
         try {
-            X509Certificate ca =
-                    findCquCertificate();
+            X509Certificate[] trustedCAs =
+                    findTrustedCquAuthorities();
 
-            if (ca == null) {
+            if (trustedCAs.length == 0) {
                 log("NETWORK SAVE ABORTED.");
-                log("Required CQU CA certificate unavailable.");
+                log("No matching trusted certificate available.");
+                log("No insecure fallback attempted.");
                 return;
             }
 
@@ -590,12 +615,7 @@ public class EnterpriseFragment extends Fragment {
                     new WifiEnterpriseConfig();
 
             enterprise.setIdentity(identity);
-
-            // Build #21:
-            // Match the working phone's blank
-            // anonymous identity setting.
             enterprise.setAnonymousIdentity("");
-
             enterprise.setPassword(password);
 
             enterprise.setEapMethod(
@@ -604,7 +624,14 @@ public class EnterpriseFragment extends Fragment {
             enterprise.setPhase2Method(
                     WifiEnterpriseConfig.Phase2.MSCHAPV2);
 
-            enterprise.setCaCertificate(ca);
+            // Build #22:
+            // Use the CA authorities matching the actual
+            // Sectigo / USERTrust certificate chain
+            // observed from radius.cqu.edu.au.
+            //
+            // Never disable server certificate validation.
+
+            enterprise.setCaCertificates(trustedCAs);
             enterprise.setDomainSuffixMatch(DOMAIN);
 
             WifiConfiguration config =
@@ -624,8 +651,8 @@ public class EnterpriseFragment extends Fragment {
             log("EAP: PEAP");
             log("Phase 2: MSCHAPV2");
             log("Anonymous identity: BLANK");
-            log("CA validation: QUOVADIS ROOT CA 2 G3");
-            log("CA fingerprint: VERIFIED");
+            log("Certificate chain: SECTIGO / USERTRUST");
+            log("Trusted CA count: " + trustedCAs.length);
             log("Server domain: " + DOMAIN);
             log("No credentials printed to log.");
 
@@ -684,7 +711,6 @@ public class EnterpriseFragment extends Fragment {
                 log("Next: connect through TV Wi-Fi settings.");
             } else {
                 log("NETWORK SAVE FAILED.");
-                log("Both update/add paths unsuccessful.");
                 log("Android rejected the configuration.");
             }
 
